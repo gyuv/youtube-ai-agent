@@ -20,15 +20,22 @@ does no rendering and runs no scripts; it only needs a browser.
 cloud/
 ├── prisma/schema.prisma   Channel, VideoProject, Scene
 ├── prisma.config.ts       Prisma CLI config (migrations use DIRECT_URL)
+├── remotion/              the video composition: scenes, Ken Burns, B-roll, captions
+├── scripts/               render-worker.ts (runs on GitHub Actions), render-smoke.ts
 ├── src/
-│   ├── app/               Next.js App Router pages and API routes
+│   ├── app/               Next.js App Router pages and API routes (/api/render/webhook)
 │   ├── components/ui/     shadcn/ui components (added with `npx shadcn add ...`)
 │   ├── lib/prisma.ts      lazy Prisma client on the pg driver adapter (Supabase pooler)
-│   ├── lib/storage.ts     Supabase Storage uploads over REST
+│   ├── lib/storage.ts     Supabase Storage or Cloudflare R2, plus signed upload URLs
+│   ├── lib/crypto.ts      AES-256-GCM for OAuth tokens at rest
 │   ├── lib/env.ts         lazy env access; a missing key fails only the feature using it
-│   └── services/          provider integrations + pipeline orchestration (below)
+│   ├── services/          provider integrations, pipeline, render webhook, YouTube (below)
+│   └── worker/            runner-side code: downloads, encoding plan, YouTube upload
 └── .env.example           every variable the app reads
 ```
+
+The cloud renderer workflow lives at the repository root in `.github/workflows/render-video.yml`,
+because GitHub only reads workflows from there.
 
 ## Services
 
@@ -39,6 +46,8 @@ cloud/
 | `visualFetcher.ts` | Pollinations.ai images (downloaded, then stored in Supabase) and Pexels B-roll with a stock-photo fallback, picking the ~1080p rendition. |
 | `renderDispatcher.ts` | `repository_dispatch` → `.github/workflows/render-video.yml`, payload is just the project id. |
 | `pipeline.ts` | DB orchestration: whole-script generation, per-scene audio/visual regeneration, bulk asset fill, and an atomic claim before dispatching a render. |
+| `renderJob.ts` | Server side of the render webhook: claims the job, issues the signed upload URL, records RENDERED/PUBLISHED/FAILED. |
+| `youtube.ts` | Refreshes the channel's access token and builds upload metadata (chapters, `#Shorts`, scheduling). |
 
 Status rules enforced by `pipeline.ts`:
 
@@ -47,16 +56,57 @@ Status rules enforced by `pipeline.ts`:
 - Editing narration drops the old audio, so stale voiceover can never be rendered.
 - A render can be dispatched only when every scene has audio, a visual and a duration; two clicks can't start two runners.
 
+## Cloud renderer
+
+```
+Studio ── "Dispatch Cloud Render" ──▶ GitHub repository_dispatch ──▶ render-video.yml (ubuntu runner)
+                                                                        │
+   ◀── started ── returns scenes + a signed upload URL ─────────────────┤ download assets
+                                                                        │ Remotion → 1080p H.264
+   ◀── rendered ─ returns YouTube instructions if auto-publish is on ───┤ PUT mp4 to storage
+   ◀── published / failed ──────────────────────────────────────────────┘ resumable YouTube upload
+```
+
+The runner holds no database or storage credentials. It authenticates to `/api/render/webhook`
+with `RENDER_WEBHOOK_SECRET`, uploads through a signed URL, and for auto-publish receives a
+one-hour YouTube access token (the refresh token never leaves the app).
+
+**One-time setup**
+
+1. Merge the workflow to the repository's **default branch**: GitHub only starts
+   `repository_dispatch` workflows from there.
+2. Repository → Settings → Secrets and variables → Actions → add `APP_URL` (the deployed
+   studio's https URL) and `RENDER_WEBHOOK_SECRET` (same value as in Vercel).
+3. In Vercel add `GITHUB_DISPATCH_TOKEN`: a fine-grained token for this repository with
+   **Contents: read and write** (required by `repository_dispatch`).
+4. Make the storage bucket public-read. For long-form 1080p, use `STORAGE_DRIVER=r2`: Supabase's
+   free tier caps files at 50 MB, and the renderer refuses to squeeze a long video below
+   watchable quality to fit.
+
+**Try it without any accounts**: `npm run render:smoke` renders a real two-scene Short
+(`SMOKE_FORMAT=LONG_FORM` for 16:9) against a local stand-in for the app. CI runs both.
+
+**Free-tier limits to know**
+
+| Limit | Effect |
+| --- | --- |
+| GitHub Actions: free for public repos; 2,000 min/month for private repos (Free plan) | a 60s Short takes a few minutes including setup |
+| YouTube Data API: 10,000 units/day; each upload costs 1,600 | about 6 uploads per day per Google Cloud project |
+| Google OAuth consent screen in **Testing** mode | refresh tokens expire after 7 days; publish the app (unverified is fine for your own channel) |
+| Remotion | free for individuals and companies of up to 3 people; others set `REMOTION_LICENSE_KEY` |
+
+Uploads are marked `containsSyntheticMedia: true` because the voice and imagery are AI-generated,
+which YouTube asks creators to disclose. Scheduled projects (`scheduledFor`) upload as private
+with `publishAt`, and YouTube makes them public at that time.
+
 ## Checks
 
 ```bash
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-`.github/workflows/cloud-ci.yml` runs the same checks on every push that touches `cloud/`.
-
-The cloud renderer workflow lives at the repository root in `.github/workflows/render-video.yml`
-(step 4), because GitHub only reads workflows from there.
+`.github/workflows/cloud-ci.yml` runs the same checks, plus both smoke renders, on every push
+that touches `cloud/`.
 
 ## Pipeline states
 

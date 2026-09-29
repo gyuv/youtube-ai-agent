@@ -7,7 +7,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "remotion/**/*.test.ts"],
     restoreMocks: true,
     unstubEnvs: true,
     unstubGlobals: true,

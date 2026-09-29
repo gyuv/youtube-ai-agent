@@ -1,0 +1,95 @@
+name: Render video
+
+# Started by the studio's "Dispatch Cloud Render" button (repository_dispatch, see
+# cloud/src/services/renderDispatcher.ts) or by hand from the Actions tab.
+# GitHub only runs repository_dispatch workflows that exist on the default branch.
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   APP_URL                 https URL of the deployed studio, e.g. https://lumen.vercel.app
+#   RENDER_WEBHOOK_SECRET   same value as in Vercel (32+ random characters)
+#   REMOTION_LICENSE_KEY    optional; only companies with 4+ people need a Remotion license
+#
+# The runner never receives database or storage credentials: the app hands it a signed
+# upload URL and, for auto-publish, a one-hour YouTube access token.
+
+on:
+  repository_dispatch:
+    types: [render-video]
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: VideoProject id to render
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One render per project at a time; a second request waits instead of racing the first.
+concurrency:
+  group: render-${{ github.event.client_payload.project_id || inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  render:
+    name: Render ${{ github.event.client_payload.project_id || inputs.project_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: cloud
+    env:
+      # Untrusted input: only ever used through this env var, never interpolated into scripts.
+      PROJECT_ID: ${{ github.event.client_payload.project_id || inputs.project_id }}
+      APP_URL: ${{ secrets.APP_URL }}
+      RENDER_WEBHOOK_SECRET: ${{ secrets.RENDER_WEBHOOK_SECRET }}
+      REMOTION_LICENSE_KEY: ${{ secrets.REMOTION_LICENSE_KEY }}
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Check inputs and secrets
+        working-directory: .
+        run: |
+          if [[ ! "$PROJECT_ID" =~ ^[a-z0-9]{20,40}$ ]]; then
+            echo "::error::project_id must be a VideoProject id"; exit 1
+          fi
+          if [[ -z "$APP_URL" || -z "$RENDER_WEBHOOK_SECRET" ]]; then
+            echo "::error::Add the APP_URL and RENDER_WEBHOOK_SECRET repository secrets"; exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloud/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Cache Remotion's headless Chrome
+        uses: actions/cache@v4
+        with:
+          path: cloud/node_modules/.remotion
+          key: remotion-browser-${{ runner.os }}-${{ hashFiles('cloud/package-lock.json') }}
+
+      - name: Render, upload and report
+        run: npm run render:worker
+
+      # The worker reports its own failures; this covers crashes, timeouts and cancellations.
+      # The app ignores a duplicate report for a run it already marked FAILED.
+      - name: Report failure to the studio
+        if: failure() || cancelled()
+        working-directory: .
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [[ "$PROJECT_ID" =~ ^[a-z0-9]{20,40}$ && -n "$APP_URL" ]] || exit 0
+          jq -n --arg p "$PROJECT_ID" --arg r "$GITHUB_RUN_ID" --arg e "Render job ended with status $JOB_STATUS. Logs: $RUN_URL" \
+            '{event: "failed", projectId: $p, runId: $r, stage: "render", error: $e}' |
+            curl -sS --retry 3 -X POST "$APP_URL/api/render/webhook" \
+              -H "Authorization: Bearer $RENDER_WEBHOOK_SECRET" -H "Content-Type: application/json" --data @- || true
