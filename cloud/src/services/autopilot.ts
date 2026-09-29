@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets } from "./pipeline";
 import { firstFreeSlot, formatSlot, isValidCron } from "./schedule";
 import { proposeTopic } from "./topicPlanner";
+import { checkYouTubeVisibility } from "./youtube";
+import { SCHEDULE_GRACE_MS } from "./youtubeVisibility";
 
 /**
  * The autopilot. A GitHub Actions workflow calls `autopilotTick` repeatedly; each call does at
@@ -14,7 +16,8 @@ import { proposeTopic } from "./topicPlanner";
  *   1. dispatch     an autopilot video whose assets are complete (or retry a failed render)
  *   2. fill         one missing voice/visual on an autopilot video
  *   3. script       an autopilot video that has only a topic
- *   4. plan         a new video for the earliest open slot inside a channel's lead window
+ *   4. verify       a published video whose slot has passed really went live (not locked private)
+ *   5. plan         a new video for the earliest open slot inside a channel's lead window
  *
  * Work is taken in deadline order (earliest slot first) and finished before new work starts.
  * The autopilot only ever touches projects it created, and gives up on one after
@@ -26,8 +29,9 @@ export const STALE_RENDER_MS = 3 * 60 * 60 * 1000;
 /** After a video gives up, stop planning new ones on that channel for a while (circuit breaker). */
 export const PLANNING_PAUSE_MS = 12 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const VERIFY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type TickAction = "dispatched" | "filled" | "scripted" | "planned" | "error" | "idle";
+export type TickAction = "dispatched" | "filled" | "scripted" | "verified" | "planned" | "error" | "idle";
 
 export interface TickResult {
   action: TickAction;
@@ -132,6 +136,28 @@ function findWork(projects: WorkProject[], channels: Map<string, AutopilotChanne
     if (p.status === ProjectStatus.DRAFT) return { kind: "script" as const, project: p, channel: channels.get(p.channelId)! };
   }
   return null;
+}
+
+/**
+ * A scheduled autopilot video whose slot has passed but whose visibility was last read before it
+ * should have gone live. YouTube only flips it public at the slot, so that is when a lock shows.
+ */
+async function findVideoToVerify(channelIds: string[], now: Date) {
+  const liveBy = new Date(now.getTime() - SCHEDULE_GRACE_MS);
+  const candidates = await prisma.videoProject.findMany({
+    where: {
+      autopilot: true,
+      channelId: { in: channelIds },
+      status: ProjectStatus.PUBLISHED,
+      youtubeLocked: false,
+      privacy: { not: "PRIVATE" },
+      scheduledFor: { gte: new Date(now.getTime() - VERIFY_WINDOW_MS), lte: liveBy },
+    },
+    orderBy: { scheduledFor: "asc" },
+    take: 20,
+    select: { id: true, channelId: true, title: true, topic: true, scheduledFor: true, youtubeCheckedAt: true },
+  });
+  return candidates.find((p) => !p.youtubeCheckedAt || p.youtubeCheckedAt.getTime() < p.scheduledFor!.getTime() + SCHEDULE_GRACE_MS) ?? null;
 }
 
 /**
@@ -252,6 +278,28 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       const step = work.kind === "dispatch" ? "Render dispatch" : work.kind === "fill" ? "Asset generation" : "Script writing";
       const message = await recordFailure(project, step, error);
       // Other projects may still progress; failure caps keep this from looping forever.
+      return { action: "error", message, more: true, swept, ...ids };
+    }
+  }
+
+  const toVerify = await findVideoToVerify([...byId.keys()], now);
+  if (toVerify) {
+    const ids = { projectId: toVerify.id, channelId: toVerify.channelId };
+    const name = `"${toVerify.title ?? toVerify.topic}"`;
+    try {
+      const { visibility, locked } = await checkYouTubeVisibility(toVerify.id, now);
+      const message = locked
+        ? `${name} is still private on YouTube after its slot: YouTube locked the upload. Open it in the studio for why.`
+        : visibility
+          ? `${name} is ${visibility.privacyStatus} on YouTube.`
+          : `${name} is no longer on YouTube.`;
+      await log(locked || !visibility ? "error" : "info", "verified", message, ids);
+      return { action: "verified", message, more: true, swept, ...ids };
+    } catch (error) {
+      // Recorded as checked so an unreachable channel isn't retried on every step.
+      await prisma.videoProject.update({ where: { id: toVerify.id }, data: { youtubeCheckedAt: now } });
+      const message = `Couldn't check ${name} on YouTube: ${errorMessage(error)}`;
+      await log("error", "error", message, ids);
       return { action: "error", message, more: true, swept, ...ids };
     }
   }

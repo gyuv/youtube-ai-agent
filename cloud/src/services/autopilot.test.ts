@@ -7,10 +7,12 @@ const db = vi.hoisted(() => ({
 }));
 const pipeline = vi.hoisted(() => ({ dispatchCloudRender: vi.fn(), fillSceneAssets: vi.fn(), generateProjectScript: vi.fn() }));
 const planner = vi.hoisted(() => ({ proposeTopic: vi.fn() }));
+const youtube = vi.hoisted(() => ({ checkYouTubeVisibility: vi.fn() }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("./pipeline", async (importActual) => ({ ...(await importActual<typeof import("./pipeline")>()), ...pipeline }));
 vi.mock("./topicPlanner", () => planner);
+vi.mock("./youtube", () => youtube);
 
 import { MAX_AUTOPILOT_FAILURES, autopilotTick } from "./autopilot";
 
@@ -53,10 +55,12 @@ function projectsQuery({
   scheduled = [],
   recent = [],
   gaveUp = [],
-}: { stale?: object[]; work?: object[]; scheduled?: object[]; recent?: object[]; gaveUp?: object[] }) {
+  verify = [],
+}: { stale?: object[]; work?: object[]; scheduled?: object[]; recent?: object[]; gaveUp?: object[]; verify?: object[] }) {
   db.videoProject.findMany.mockImplementation(async (args: { where?: Record<string, unknown>; take?: number }) => {
     if (args.where?.autopilotFailures && (args.where.autopilotFailures as { gte?: number }).gte) return gaveUp;
     if (args.where?.updatedAt) return stale;
+    if (args.where?.youtubeLocked === false) return verify;
     if (args.where?.autopilot) return work;
     if (args.where?.scheduledFor) return scheduled;
     if (args.take === 40) return recent;
@@ -65,7 +69,7 @@ function projectsQuery({
 }
 
 beforeEach(() => {
-  for (const group of [...Object.values(db), pipeline, planner]) for (const fn of Object.values(group)) fn.mockReset();
+  for (const group of [...Object.values(db), pipeline, planner, youtube]) for (const fn of Object.values(group)) fn.mockReset();
   db.channel.findMany.mockResolvedValue([CHANNEL]);
   db.videoProject.create.mockImplementation(async ({ data }) => ({ id: "new1", ...data }));
   projectsQuery({});
@@ -181,6 +185,30 @@ describe("autopilotTick", () => {
     expect(result).toMatchObject({ action: "idle", more: false, message: expect.stringMatching(/Planning paused/) });
     expect(db.videoProject.create).not.toHaveBeenCalled();
     expect(planner.proposeTopic).not.toHaveBeenCalled();
+  });
+
+  it("checks a scheduled video went live once its slot has passed", async () => {
+    const slot = new Date("2026-09-28T18:00:00Z");
+    projectsQuery({
+      verify: [
+        { id: "seen", channelId: "c1", title: "Checked after its slot", topic: "t", scheduledFor: slot, youtubeCheckedAt: new Date("2026-09-28T19:00:00Z") },
+        { id: "p9", channelId: "c1", title: "Gold in 2026", topic: "t", scheduledFor: slot, youtubeCheckedAt: new Date("2026-09-27T09:00:00Z") },
+      ],
+    });
+    youtube.checkYouTubeVisibility.mockResolvedValue({ visibility: { privacyStatus: "private", publishAt: slot.toISOString() }, locked: true });
+    const result = await autopilotTick(NOW);
+    expect(youtube.checkYouTubeVisibility).toHaveBeenCalledWith("p9", NOW);
+    expect(result).toMatchObject({ action: "verified", projectId: "p9", more: true, message: expect.stringMatching(/still private/) });
+    expect(db.autopilotEvent.create.mock.calls.at(-1)![0].data).toMatchObject({ level: "error", action: "verified" });
+    expect(db.videoProject.create).not.toHaveBeenCalled(); // planning waits for the next step
+  });
+
+  it("marks a video checked when YouTube can't be reached, so it isn't retried every step", async () => {
+    projectsQuery({ verify: [{ id: "p9", channelId: "c1", title: null, topic: "Gold", scheduledFor: new Date("2026-09-28T18:00:00Z"), youtubeCheckedAt: null }] });
+    youtube.checkYouTubeVisibility.mockRejectedValue(new Error("Google revoked or expired this channel's authorisation"));
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "error", more: true });
+    expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "p9" }, data: { youtubeCheckedAt: NOW } });
   });
 
   it("stays idle until a slot enters the lead window", async () => {

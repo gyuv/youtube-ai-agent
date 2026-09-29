@@ -35,6 +35,15 @@ describe("buildYouTubeMetadata", () => {
     expect(meta.status.publishAt).toBe("2026-10-02T12:30:00.000Z");
   });
 
+  it("never schedules private or unlisted videos, since YouTube makes scheduled videos public", () => {
+    const scheduledFor = new Date("2026-10-02T12:30:00Z");
+    for (const privacy of ["PRIVATE", "UNLISTED"] as const) {
+      const meta = buildYouTubeMetadata({ ...base, privacy, scheduledFor }, [], channel, NOW);
+      expect(meta.status.privacyStatus).toBe(privacy.toLowerCase());
+      expect(meta.status.publishAt).toBeUndefined();
+    }
+  });
+
   it("adds chapters to long-form when scenes still match the script", () => {
     const beat = { narration: "n", imagePrompt: "i", stockQuery: "q" };
     const script = {

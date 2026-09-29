@@ -1,8 +1,9 @@
-import { Bot, ChevronLeft, CircleAlert, ExternalLink, Github, Radio, Youtube } from "lucide-react";
+import { Bot, ChevronLeft, CircleAlert, ExternalLink, Github, Lock, Radio, Youtube } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
+import { timeAgo } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +13,7 @@ import { sceneHasAssets } from "@/services/pipeline";
 import { getStudioProject } from "@/services/projects";
 import { actionsRunUrl } from "@/services/renderDispatcher";
 import { formatSlot } from "@/services/schedule";
+import { AUDIT_FORM_URL } from "@/services/youtubeVisibility";
 import { AutoRefresh } from "./_components/auto-refresh";
 import { MetadataForm } from "./_components/metadata-form";
 import { PreviewPlayer } from "./_components/preview-player";
@@ -19,6 +21,7 @@ import { SceneCard } from "./_components/scene-card";
 import { StudioToolbar } from "./_components/studio-toolbar";
 import { TimelineStrip } from "./_components/timeline-strip";
 import { formatDuration, type StudioScene } from "./_components/types";
+import { VisibilityCheck } from "./_components/visibility-check";
 
 export const dynamic = "force-dynamic";
 // Gemini, edge-tts and Pollinations calls run inside this page's server actions.
@@ -161,6 +164,32 @@ export default async function StudioPage({ params, searchParams }: Params) {
           </AlertDescription>
         </Alert>
       ) : null}
+      {project.status === ProjectStatus.PUBLISHED && project.youtubeLocked ? (
+        <Alert variant="warning" className="mb-6">
+          <Lock />
+          <AlertTitle>YouTube kept this video private</AlertTitle>
+          <AlertDescription className="grid gap-2">
+            <p>
+              You asked for {project.privacy === "PUBLIC" ? "Public" : "Unlisted"}, but YouTube reports the video as private. YouTube does this to every
+              upload from a Google Cloud project that hasn&apos;t passed the YouTube API Services audit: the video is locked private, whatever the
+              request said.
+            </p>
+            <ul className="list-disc pl-5">
+              <li>
+                <a href={AUDIT_FORM_URL} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                  Apply for the audit
+                </a>{" "}
+                with the Google Cloud project that holds your OAuth client. Once approved, new uploads keep the visibility you choose.
+              </li>
+              <li>Until then, download the rendered MP4 below and upload it yourself in YouTube Studio, then delete the locked copy.</li>
+            </ul>
+            <div className="flex flex-wrap items-center gap-3">
+              <VisibilityCheck projectId={project.id} variant="secondary" />
+              {project.youtubeCheckedAt ? <span className="text-xs">Checked {timeAgo(project.youtubeCheckedAt)}</span> : null}
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {project.lastError ? (
         <Alert variant="destructive" className="mb-6">
           <CircleAlert />
@@ -192,6 +221,11 @@ export default async function StudioPage({ params, searchParams }: Params) {
                   <a href={runUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-muted-foreground hover:text-foreground hover:underline">
                     <Github className="size-4" /> Render log
                   </a>
+                ) : null}
+                {project.status === ProjectStatus.PUBLISHED && project.youtubeVideoId && !project.youtubeLocked ? (
+                  <div className="mt-1">
+                    <VisibilityCheck projectId={project.id} />
+                  </div>
                 ) : null}
               </CardContent>
             </Card>

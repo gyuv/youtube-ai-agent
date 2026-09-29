@@ -15,6 +15,7 @@ import {
   type SceneFillResult,
 } from "@/services/pipeline";
 import { createProject, deleteProject, setSceneLocked, updateProjectMetadata } from "@/services/projects";
+import { checkYouTubeVisibility } from "@/services/youtube";
 
 const Id = z.string().regex(/^[a-z0-9]{20,40}$/, "Invalid id");
 const VisualSource = z.enum(["POLLINATIONS", "PEXELS"]);
@@ -77,6 +78,16 @@ export async function dispatchRenderAction(projectId: string): Promise<ActionRes
   const result = await toActionResult(async () => {
     const { workflowUrl } = await dispatchCloudRender(Id.parse(projectId));
     return { workflowUrl };
+  });
+  refresh(projectId);
+  return result;
+}
+
+export async function checkVisibilityAction(projectId: string): Promise<ActionResult<{ visibility: string | null; locked: boolean }>> {
+  await requireOperator();
+  const result = await toActionResult(async () => {
+    const { visibility, locked } = await checkYouTubeVisibility(Id.parse(projectId));
+    return { visibility: visibility?.privacyStatus ?? null, locked };
   });
   refresh(projectId);
   return result;

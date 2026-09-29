@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, CalendarClock, Clapperboard, Cog, Plus, Radio, Youtube } from "lucide-react";
+import { AlertTriangle, Bot, CalendarClock, Clapperboard, Cog, Lock, Plus, Radio, Youtube } from "lucide-react";
 import Link from "next/link";
 import { AutopilotPanel } from "@/components/autopilot-panel";
 import { PageHeader, timeAgo } from "@/components/page-header";
@@ -13,10 +13,11 @@ import { formatSlot } from "@/services/schedule";
 
 export const dynamic = "force-dynamic";
 
+type Row = DashboardData["projects"][number];
 const VIEWS = {
-  active: { label: "In pipeline", match: (s: ProjectStatus) => ACTIVE_STATUSES.includes(s) },
-  attention: { label: "Needs attention", match: (s: ProjectStatus) => s === ProjectStatus.FAILED },
-  published: { label: "Published", match: (s: ProjectStatus) => s === ProjectStatus.PUBLISHED },
+  active: { label: "In pipeline", match: (p: Row) => ACTIVE_STATUSES.includes(p.status) },
+  attention: { label: "Needs attention", match: (p: Row) => p.status === ProjectStatus.FAILED || p.youtubeLocked },
+  published: { label: "Published", match: (p: Row) => p.status === ProjectStatus.PUBLISHED },
   all: { label: "All", match: () => true },
 } as const;
 type View = keyof typeof VIEWS;
@@ -28,7 +29,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   if (data.channels.length === 0) return <Onboarding />;
 
-  const projects = data.projects.filter((p) => VIEWS[view].match(p.status));
+  const projects = data.projects.filter((p) => VIEWS[view].match(p));
   return (
     <>
       <PageHeader title="Dashboard" description="Every stage runs on free cloud services. Spend to date: $0.00." />
@@ -115,7 +116,7 @@ function Stat({ icon, label, value, href, live, warn }: { icon: React.ReactNode;
   );
 }
 
-function ProjectRow({ project }: { project: DashboardData["projects"][number] }) {
+function ProjectRow({ project }: { project: Row }) {
   const ratio = project.sceneCount ? project.scenesReady / project.sceneCount : 0;
   return (
     <TableRow className="relative">
@@ -136,7 +137,14 @@ function ProjectRow({ project }: { project: DashboardData["projects"][number] })
         </div>
       </TableCell>
       <TableCell>
-        <StatusBadge status={project.status} />
+        <div className="flex items-center gap-1.5">
+          <StatusBadge status={project.status} />
+          {project.youtubeLocked ? (
+            <span className="text-amber-600 dark:text-amber-300" title="YouTube kept this video private">
+              <Lock className="size-3.5" aria-label="Locked private on YouTube" />
+            </span>
+          ) : null}
+        </div>
       </TableCell>
       <TableCell>
         {project.sceneCount === 0 ? (

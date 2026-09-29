@@ -89,7 +89,7 @@ export function MetadataForm({ projectId, title, description, tags, privacy, sch
                 <Input id="meta-schedule" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />
               </div>
             </div>
-            <FieldHint>A future time uploads the video as private and YouTube publishes it then.</FieldHint>
+            <FieldHint>A public video with a future time uploads as private and YouTube makes it public then. Private and unlisted videos upload with that visibility.</FieldHint>
           </fieldset>
           {readOnly ? (
             <FieldHint>This video is on YouTube; edit its details in YouTube Studio.</FieldHint>

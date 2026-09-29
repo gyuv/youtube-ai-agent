@@ -15,7 +15,7 @@ export const ACTIVE_STATUSES: ProjectStatus[] = [
 
 export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
   const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const [channels, projects, byStatus, publishedThisMonth, scheduled, events] = await Promise.all([
+  const [channels, projects, byStatus, publishedThisMonth, lockedPrivate, scheduled, events] = await Promise.all([
     prisma.channel.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.videoProject.findMany({
       orderBy: { updatedAt: "desc" },
@@ -27,6 +27,7 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
     }),
     prisma.videoProject.groupBy({ by: ["status"], _count: { _all: true } }),
     prisma.videoProject.count({ where: { status: ProjectStatus.PUBLISHED, publishedAt: { gte: monthAgo } } }),
+    prisma.videoProject.count({ where: { status: ProjectStatus.PUBLISHED, youtubeLocked: true } }),
     prisma.videoProject.findMany({
       where: { scheduledFor: { gte: now } },
       select: { id: true, channelId: true, title: true, topic: true, status: true, scheduledFor: true },
@@ -42,7 +43,8 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
     stats: {
       inProgress: count(ProjectStatus.DRAFT, ProjectStatus.SCRIPTED, ProjectStatus.ASSETS_READY),
       rendering: count(ProjectStatus.QUEUED_FOR_RENDER, ProjectStatus.RENDERING),
-      needsAttention: count(ProjectStatus.FAILED),
+      // Failed videos, and published ones YouTube kept private.
+      needsAttention: count(ProjectStatus.FAILED) + lockedPrivate,
       publishedThisMonth,
     },
     projects: projects.map((p) => ({
@@ -57,6 +59,7 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
       scheduledFor: p.scheduledFor,
       lastError: p.lastError,
       autopilot: p.autopilot,
+      youtubeLocked: p.status === ProjectStatus.PUBLISHED && p.youtubeLocked,
       scenesReady: p.scenes.filter(sceneHasAssets).length,
       sceneCount: p.scenes.length,
     })),

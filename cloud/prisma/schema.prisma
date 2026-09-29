@@ -133,6 +133,10 @@ model VideoProject {
   scheduledFor   DateTime? // next slot from the channel's posting schedule
   youtubeVideoId String?   @unique
   publishedAt    DateTime?
+  // YouTube reported the upload as private although it should be (or become) visible. Unaudited
+  // Google Cloud projects get every API upload locked private until the YouTube API audit passes.
+  youtubeLocked    Boolean   @default(false)
+  youtubeCheckedAt DateTime? // last time the video's visibility was read back from YouTube
 
   // Created and advanced by the autopilot; it never touches operator-made projects.
   autopilot         Boolean @default(false)
