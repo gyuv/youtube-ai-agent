@@ -1,0 +1,21 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# prisma generated client (rebuilt by `prisma generate` on install)
+/src/generated/
+
+# env files
+.env
+.env*.local
+
+# vercel
+.vercel
+
+# render worker scratch output
+/render-out/

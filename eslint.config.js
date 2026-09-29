@@ -3,6 +3,8 @@ const js = require('@eslint/js');
 module.exports = [
   {
     ignores: [
+      // Next.js/TypeScript app with its own ESLint config (cloud/eslint.config.mjs)
+      'cloud/**',
       'node_modules/**',
       'coverage/**',
       'logs/**',
