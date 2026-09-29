@@ -1,0 +1,89 @@
+name: Cloud CI
+
+on:
+  push:
+    paths:
+      - "cloud/**"
+      - ".github/workflows/cloud-ci.yml"
+  pull_request:
+    paths:
+      - "cloud/**"
+      - ".github/workflows/cloud-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloud/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # No database or API secrets needed: every integration reads its env vars lazily.
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  # Renders a real 1080p Short and long-form video on the same runner image the cloud
+  # renderer uses, against a local stand-in for the app. Needs no secrets.
+  render-smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloud/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Remotion's headless Chrome
+        uses: actions/cache@v4
+        with:
+          path: cloud/node_modules/.remotion
+          key: remotion-browser-${{ runner.os }}-${{ hashFiles('cloud/package-lock.json') }}
+
+      - name: Smoke render (9:16 Short)
+        run: npm run render:smoke
+
+      - name: Smoke render (16:9 long-form)
+        run: npm run render:smoke
+        env:
+          SMOKE_FORMAT: LONG_FORM

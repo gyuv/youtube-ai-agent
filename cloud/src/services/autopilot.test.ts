@@ -1,0 +1,192 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const db = vi.hoisted(() => ({
+  channel: { findMany: vi.fn(), update: vi.fn() },
+  videoProject: { findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn(), create: vi.fn() },
+  autopilotEvent: { create: vi.fn(), deleteMany: vi.fn() },
+}));
+const pipeline = vi.hoisted(() => ({ dispatchCloudRender: vi.fn(), fillSceneAssets: vi.fn(), generateProjectScript: vi.fn() }));
+const planner = vi.hoisted(() => ({ proposeTopic: vi.fn() }));
+
+vi.mock("@/lib/prisma", () => ({ prisma: db }));
+vi.mock("./pipeline", async (importActual) => ({ ...(await importActual<typeof import("./pipeline")>()), ...pipeline }));
+vi.mock("./topicPlanner", () => planner);
+
+import { MAX_AUTOPILOT_FAILURES, autopilotTick } from "./autopilot";
+
+const NOW = new Date("2026-09-29T00:00:00Z"); // Tuesday
+const CHANNEL = {
+  id: "c1",
+  name: "Money Minute",
+  niche: "Personal finance",
+  targetAudience: null,
+  language: "en",
+  defaultFormat: "SHORT",
+  defaultPrivacy: "UNLISTED",
+  defaultScriptPrompt: null,
+  postingCron: "0 18 * * *", // daily 18:00 UTC
+  postingTimezone: "UTC",
+  isActive: true,
+  autopilot: true,
+  autopilotReview: false,
+  autopilotLeadHours: 36,
+  autopilotVisualSource: "PEXELS",
+  topicBacklog: null as string | null,
+};
+const ready = (i: number) => ({ id: `s${i}`, sceneIndex: i, locked: false, voiceAudioUrl: "a", imageUrl: "i", videoClipUrl: null, durationSeconds: 3 });
+const project = (overrides: object = {}) => ({
+  id: "p1",
+  channelId: "c1",
+  status: "SCRIPTED",
+  topic: "Salary day habits",
+  title: null,
+  autopilotFailures: 0,
+  scheduledFor: new Date("2026-09-29T18:00:00Z"),
+  scenes: [ready(0), ready(1)],
+  ...overrides,
+});
+
+/** Route prisma.videoProject.findMany calls by the shape of their query. */
+function projectsQuery({
+  stale = [],
+  work = [],
+  scheduled = [],
+  recent = [],
+  gaveUp = [],
+}: { stale?: object[]; work?: object[]; scheduled?: object[]; recent?: object[]; gaveUp?: object[] }) {
+  db.videoProject.findMany.mockImplementation(async (args: { where?: Record<string, unknown>; take?: number }) => {
+    if (args.where?.autopilotFailures && (args.where.autopilotFailures as { gte?: number }).gte) return gaveUp;
+    if (args.where?.updatedAt) return stale;
+    if (args.where?.autopilot) return work;
+    if (args.where?.scheduledFor) return scheduled;
+    if (args.take === 40) return recent;
+    throw new Error(`unexpected query ${JSON.stringify(args)}`);
+  });
+}
+
+beforeEach(() => {
+  for (const group of [...Object.values(db), pipeline, planner]) for (const fn of Object.values(group)) fn.mockReset();
+  db.channel.findMany.mockResolvedValue([CHANNEL]);
+  db.videoProject.create.mockImplementation(async ({ data }) => ({ id: "new1", ...data }));
+  projectsQuery({});
+});
+
+describe("autopilotTick", () => {
+  it("does nothing when no channel has autopilot on", async () => {
+    db.channel.findMany.mockResolvedValue([]);
+    await expect(autopilotTick(NOW)).resolves.toMatchObject({ action: "idle", more: false });
+  });
+
+  it("fails renders that stopped reporting, for every project", async () => {
+    projectsQuery({ stale: [{ id: "old", channelId: "c1", status: "RENDERING" }] });
+    db.videoProject.updateMany.mockResolvedValue({ count: 1 });
+    const result = await autopilotTick(NOW);
+    expect(result.swept).toBe(1);
+    expect(db.videoProject.updateMany.mock.calls[0][0]).toMatchObject({ where: { id: "old", status: "RENDERING" }, data: { status: "FAILED" } });
+    expect(db.autopilotEvent.deleteMany).toHaveBeenCalled(); // old activity is pruned
+  });
+
+  it("dispatches finished videos before starting anything else", async () => {
+    projectsQuery({ work: [project({ id: "draft", status: "DRAFT" }), project({ status: "ASSETS_READY" })] });
+    pipeline.dispatchCloudRender.mockResolvedValue({});
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "dispatched", projectId: "p1", more: true });
+    expect(pipeline.generateProjectScript).not.toHaveBeenCalled();
+  });
+
+  it("waits for an operator on review channels", async () => {
+    db.channel.findMany.mockResolvedValue([{ ...CHANNEL, autopilotReview: true }]);
+    projectsQuery({ work: [project({ status: "ASSETS_READY" })], scheduled: [{ channelId: "c1", scheduledFor: new Date("2026-09-29T18:00:00Z") }, { channelId: "c1", scheduledFor: new Date("2026-09-30T18:00:00Z") }] });
+    const result = await autopilotTick(NOW);
+    expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
+    expect(result.action).toBe("idle");
+  });
+
+  it("retries a failed render and counts the attempt", async () => {
+    projectsQuery({ work: [project({ status: "FAILED", autopilotFailures: 1 })] });
+    pipeline.dispatchCloudRender.mockResolvedValue({});
+    const result = await autopilotTick(NOW);
+    expect(result.message).toMatch(/retry 2 of 3/);
+    expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "p1" }, data: { autopilotFailures: { increment: 1 } } });
+  });
+
+  it("fills the first missing, unlocked scene with the channel's visual source", async () => {
+    const scenes = [ready(0), { ...ready(1), locked: true, voiceAudioUrl: null }, { ...ready(2), imageUrl: null }];
+    projectsQuery({ work: [project({ scenes })] });
+    pipeline.fillSceneAssets.mockResolvedValue({ sceneIndex: 2, skipped: null, generated: ["visual"], errors: [] });
+    const result = await autopilotTick(NOW);
+    expect(pipeline.fillSceneAssets).toHaveBeenCalledWith("s2", { visualSource: "PEXELS" });
+    expect(result).toMatchObject({ action: "filled", more: true });
+  });
+
+  it("counts failures and parks the project as FAILED on the last attempt", async () => {
+    projectsQuery({ work: [project({ scenes: [{ ...ready(0), voiceAudioUrl: null }], autopilotFailures: MAX_AUTOPILOT_FAILURES - 1 })] });
+    pipeline.fillSceneAssets.mockResolvedValue({ sceneIndex: 0, skipped: null, generated: [], errors: ["Voice: edge-tts failed"] });
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "error", more: true });
+    expect(result.message).toMatch(/Autopilot gave up/);
+    expect(db.videoProject.update.mock.calls[0][0].data).toMatchObject({ autopilotFailures: 3, status: "FAILED" });
+  });
+
+  it("writes the script for a planned video", async () => {
+    projectsQuery({ work: [project({ status: "DRAFT", scenes: [] })] });
+    pipeline.generateProjectScript.mockResolvedValue({ title: "Why salaries vanish", scenes: [1, 2, 3, 4, 5, 6] });
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "scripted", message: expect.stringMatching(/6 scenes/) });
+  });
+
+  it("plans the next open slot from the topic backlog first", async () => {
+    db.channel.findMany.mockResolvedValue([{ ...CHANNEL, topicBacklog: "\n  UPI and small shops \nGold in 2026" }]);
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "planned", more: true });
+    expect(db.channel.update).toHaveBeenCalledWith({ where: { id: "c1" }, data: { topicBacklog: "Gold in 2026" } });
+    expect(db.videoProject.create.mock.calls[0][0].data).toMatchObject({
+      topic: "UPI and small shops",
+      autopilot: true,
+      scheduledFor: new Date("2026-09-29T18:00:00Z"),
+      privacy: "UNLISTED",
+    });
+    expect(planner.proposeTopic).not.toHaveBeenCalled();
+  });
+
+  it("asks Gemini for a fresh topic, passing recent ones to avoid repeats", async () => {
+    db.channel.findMany.mockResolvedValue([{ ...CHANNEL, autopilotLeadHours: 48 }]); // Wednesday's slot is 42h away
+    projectsQuery({ scheduled: [{ channelId: "c1", scheduledFor: new Date("2026-09-29T18:00:00Z") }], recent: [{ topic: "Salary day", title: "Why salaries vanish" }] });
+    planner.proposeTopic.mockResolvedValue({ topic: "Credit card grace periods", model: "m" });
+    const result = await autopilotTick(NOW);
+    expect(planner.proposeTopic.mock.calls[0][0].recentTopics).toEqual(["Why salaries vanish", "Salary day"]);
+    expect(db.videoProject.create.mock.calls[0][0].data.scheduledFor).toEqual(new Date("2026-09-30T18:00:00Z"));
+    expect(result.message).toMatch(/from Gemini/);
+  });
+
+  it("stops the run when planning fails, instead of hammering Gemini", async () => {
+    planner.proposeTopic.mockRejectedValue(new Error("Gemini rejected the request (401)"));
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "error", more: false });
+    expect(db.autopilotEvent.create.mock.calls.at(-1)![0].data).toMatchObject({ level: "error" });
+  });
+
+  it("moves on to the next channel when one can't be planned", async () => {
+    const broken = { ...CHANNEL, id: "c0", name: "Broken", postingCron: "0 12 * * *" }; // earlier slot, no backlog
+    db.channel.findMany.mockResolvedValue([broken, { ...CHANNEL, topicBacklog: "Gold in 2026" }]);
+    planner.proposeTopic.mockRejectedValue(new Error("GEMINI_API_KEY is not set"));
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "planned", channelId: "c1", more: true });
+    expect(db.autopilotEvent.create.mock.calls[0][0].data).toMatchObject({ level: "error", channelId: "c0" });
+  });
+
+  it("pauses planning on a channel whose last autopilot video gave up", async () => {
+    projectsQuery({ gaveUp: [{ channelId: "c1" }] });
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "idle", more: false, message: expect.stringMatching(/Planning paused/) });
+    expect(db.videoProject.create).not.toHaveBeenCalled();
+    expect(planner.proposeTopic).not.toHaveBeenCalled();
+  });
+
+  it("stays idle until a slot enters the lead window", async () => {
+    db.channel.findMany.mockResolvedValue([{ ...CHANNEL, autopilotLeadHours: 6 }]); // next slot is 18h away
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "idle", more: false });
+    expect(db.videoProject.create).not.toHaveBeenCalled();
+  });
+});
