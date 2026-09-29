@@ -23,11 +23,37 @@ cloud/
 ├── src/
 │   ├── app/               Next.js App Router pages and API routes
 │   ├── components/ui/     shadcn/ui components (added with `npx shadcn add ...`)
-│   ├── lib/prisma.ts      Prisma client on the pg driver adapter (Supabase pooler)
-│   ├── lib/utils.ts       `cn()` helper for shadcn/ui
-│   └── services/          Gemini, edge-tts, visuals, GitHub dispatch (step 3)
+│   ├── lib/prisma.ts      lazy Prisma client on the pg driver adapter (Supabase pooler)
+│   ├── lib/storage.ts     Supabase Storage uploads over REST
+│   ├── lib/env.ts         lazy env access; a missing key fails only the feature using it
+│   └── services/          provider integrations + pipeline orchestration (below)
 └── .env.example           every variable the app reads
 ```
+
+## Services
+
+| Module | What it does |
+| --- | --- |
+| `scriptGenerator.ts` | Gemini structured JSON (hook, sections, CTA, image prompts, stock queries, title/description/tags), validated with zod; estimated timestamps; YouTube chapter builder. Falls back to `GEMINI_FALLBACK_MODEL` on 429. |
+| `ttsGenerator.ts` | edge-tts neural voices via `msedge-tts` (pure Node, no Python): mp3 + word timings for captions. Narration is SSML-escaped; voice/rate/pitch are strictly validated. |
+| `visualFetcher.ts` | Pollinations.ai images (downloaded, then stored in Supabase) and Pexels B-roll with a stock-photo fallback, picking the ~1080p rendition. |
+| `renderDispatcher.ts` | `repository_dispatch` → `.github/workflows/render-video.yml`, payload is just the project id. |
+| `pipeline.ts` | DB orchestration: whole-script generation, per-scene audio/visual regeneration, bulk asset fill, and an atomic claim before dispatching a render. |
+
+Status rules enforced by `pipeline.ts`:
+
+- Scenes can be edited in `DRAFT`, `SCRIPTED`, `ASSETS_READY`, `RENDERED` and `FAILED`; never while queued/rendering or after publishing.
+- Locked scenes are skipped by bulk generation and refuse per-scene regeneration until unlocked.
+- Editing narration drops the old audio, so stale voiceover can never be rendered.
+- A render can be dispatched only when every scene has audio, a visual and a duration; two clicks can't start two runners.
+
+## Checks
+
+```bash
+npm run lint && npm run typecheck && npm test && npm run build
+```
+
+`.github/workflows/cloud-ci.yml` runs the same checks on every push that touches `cloud/`.
 
 The cloud renderer workflow lives at the repository root in `.github/workflows/render-video.yml`
 (step 4), because GitHub only reads workflows from there.

@@ -152,6 +152,7 @@ model Scene {
   // Visual (Pollinations image and/or Pexels B-roll). The renderer uses videoClipUrl when present,
   // otherwise imageUrl with a Ken Burns pan.
   visualPrompt String?      @db.Text
+  stockQuery   String? // 2-4 word Pexels search phrase from the script
   imageUrl     String?
   videoClipUrl String?
   visualSource VisualSource @default(POLLINATIONS)
