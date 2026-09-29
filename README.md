@@ -1,3 +1,59 @@
+# Lumen Cloud: free, fully cloud-hosted YouTube automation
+
+This fork adds **Lumen Cloud** (in [`cloud/`](cloud/)): a private studio that plans, writes,
+voices, renders and publishes YouTube videos on a schedule, using only free cloud services. You
+manage it from a browser, including on your phone. No computer has to stay on and nothing is
+installed locally.
+
+**Start here: [the complete setup and user guide](cloud/docs/GUIDE.md).**
+
+## What it does
+
+- **Writes** scripts, titles, descriptions and tags with Gemini, in your channel's niche, tone and
+  language, and suggests new topics that don't repeat earlier videos.
+- **Voices** each scene with Microsoft Edge neural voices, including Indian English and Hindi, with
+  word-timed captions.
+- **Illustrates** each scene with AI images (Pollinations) or real stock video (Pexels).
+- **Lets you repair** any scene before rendering: edit the narration, regenerate a voice or visual,
+  lock the good ones, and watch a live preview of the final video.
+- **Renders** 1080p Shorts (9:16) and long-form videos (16:9) on GitHub Actions.
+- **Publishes** to YouTube with scheduling, chapters, `#Shorts` and the AI-content disclosure, then
+  checks YouTube really applied the visibility you chose.
+- **Runs on autopilot** on your posting schedule, with an optional review step before anything
+  renders, retry limits, and an activity log.
+
+## How it's built
+
+| Part | Free service |
+| --- | --- |
+| Studio website and API | Next.js on Vercel |
+| Database and media files | Supabase (PostgreSQL + Storage), or Cloudflare R2 for large files |
+| Scripts and metadata | Google Gemini (AI Studio free tier) |
+| Voice-overs | Microsoft Edge text-to-speech |
+| Visuals | Pollinations.ai and Pexels |
+| Rendering | GitHub Actions with Remotion |
+| Publishing | YouTube Data API v3 |
+
+## Documentation
+
+| Document | For |
+| --- | --- |
+| [cloud/docs/GUIDE.md](cloud/docs/GUIDE.md) | Step-by-step setup (Supabase, Vercel, GitHub, YouTube), your first video, the autopilot, daily use, free-tier limits and troubleshooting |
+| [cloud/docs/youtube-api-audit.md](cloud/docs/youtube-api-audit.md) | Applying for YouTube's API audit, which lifts the private lock on uploads, with an answer for each part of the form |
+| [cloud/README.md](cloud/README.md) | Technical reference: architecture, services, render pipeline, autopilot internals, local development |
+
+**Before you rely on it:** Google Cloud projects that haven't passed YouTube's API audit have every
+upload kept private. The studio detects and explains this; the audit guide covers the fix.
+
+---
+
+## The original AgentTube project
+
+This repository was forked from
+[darkzOGx/youtube-automation-agent](https://github.com/darkzOGx/youtube-automation-agent), a
+self-hosted AI agent that runs on your own machine. Its code is still here, outside `cloud/`, and
+its original README follows unchanged. Lumen Cloud doesn't need any of it.
+
 # AgentTube - ECGHuNZSECqTXabaLjkVrTEnguiNZLkKF1qi8oBGpump
 
 **The open-source AI agent that runs a YouTube channel end to end.**
