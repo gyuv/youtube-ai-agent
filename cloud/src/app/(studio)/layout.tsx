@@ -1,6 +1,7 @@
 import { Clapperboard, LogOut, Plus } from "lucide-react";
 import Link from "next/link";
 import { AppNav } from "@/components/app-nav";
+import { PolicyFooter } from "@/components/policy-footer";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { requireOperator } from "@/lib/auth";
 import { logout } from "../login/actions";
@@ -32,6 +33,7 @@ export default async function StudioLayout({ children }: { children: React.React
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">{children}</main>
+      <PolicyFooter className="mx-auto max-w-7xl border-t px-4 py-6 sm:px-6" />
     </div>
   );
 }

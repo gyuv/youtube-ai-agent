@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { PrivacyStatus, VideoFormat } from "@/generated/prisma/enums";
+import { decryptSecret } from "@/lib/crypto";
 import { PipelineError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { isValidCron, isValidTimeZone } from "./schedule";
+import { CLEARED_GRANT, revokeGoogleGrant } from "./youtube";
 import { isValidVoice } from "@/lib/voices";
 
 /** Empty form fields become null. */
@@ -67,18 +69,18 @@ export async function updateChannel(id: string, input: ChannelInput) {
   return prisma.channel.update({ where: { id }, data: input });
 }
 
-/** Forget the YouTube grant. (The operator can also revoke it at myaccount.google.com/permissions.) */
+/** Revoke the YouTube grant at Google, then delete the stored tokens whatever Google answered. */
 export async function disconnectChannel(id: string) {
-  await getChannel(id);
-  return prisma.channel.update({
-    where: { id },
-    data: {
-      youtubeChannelId: null,
-      oauthAccessTokenEnc: null,
-      oauthRefreshTokenEnc: null,
-      oauthTokenExpiresAt: null,
-      oauthScopes: [],
-      autoPublish: false,
-    },
-  });
+  const channel = await getChannel(id);
+  if (channel.oauthRefreshTokenEnc) {
+    // Revoking the refresh token also invalidates the access tokens issued from it.
+    let token: string | null = null;
+    try {
+      token = decryptSecret(channel.oauthRefreshTokenEnc);
+    } catch {
+      token = null; // key rotated; nothing usable to revoke
+    }
+    if (token && !(await revokeGoogleGrant(token))) console.warn(`Google did not confirm revoking the grant for channel ${id}`);
+  }
+  return prisma.channel.update({ where: { id }, data: CLEARED_GRANT });
 }
