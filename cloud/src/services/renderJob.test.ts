@@ -8,7 +8,11 @@ const storage = vi.hoisted(() => ({
   maxObjectBytes: vi.fn(() => 50 * 1024 * 1024),
   publicObjectUrl: vi.fn((path: string) => `https://cdn.example/${path}`),
 }));
-const youtube = vi.hoisted(() => ({ getChannelAccessToken: vi.fn(), buildYouTubeMetadata: vi.fn(() => ({ snippet: {}, status: {} })) }));
+const youtube = vi.hoisted(() => ({
+  getChannelAccessToken: vi.fn(),
+  buildYouTubeMetadata: vi.fn(() => ({ snippet: {}, status: {} })),
+  wantedVisibility: vi.fn((privacy: string) => privacy.toLowerCase()),
+}));
 
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("@/lib/storage", () => storage);
@@ -41,6 +45,7 @@ beforeEach(() => {
   for (const fn of [...Object.values(db.videoProject), ...Object.values(youtube)]) fn.mockReset();
   storage.createSignedUpload.mockReset();
   youtube.buildYouTubeMetadata.mockReturnValue({ snippet: {}, status: {} });
+  youtube.wantedVisibility.mockImplementation((privacy: string) => privacy.toLowerCase());
 });
 
 describe("started", () => {
@@ -133,13 +138,37 @@ describe("published and failed", () => {
   const ids = { projectId: PROJECT_ID, runId: "77" };
 
   it("marks the project published, and treats a duplicate delivery as a no-op", async () => {
+    db.videoProject.findUnique.mockResolvedValue({ status: "RENDERED", youtubeVideoId: null, privacy: "PUBLIC" });
     db.videoProject.updateMany.mockResolvedValue({ count: 1 });
     await expect(handleRenderEvent({ event: "published", ...ids, youtubeVideoId: "dQw4w9WgXcQ" })).resolves.toEqual({ ok: true });
-    expect(db.videoProject.updateMany.mock.calls[0][0].data).toMatchObject({ status: "PUBLISHED", youtubeVideoId: "dQw4w9WgXcQ" });
+    expect(db.videoProject.updateMany.mock.calls[0][0].data).toMatchObject({
+      status: "PUBLISHED",
+      youtubeVideoId: "dQw4w9WgXcQ",
+      youtubeLocked: false,
+      youtubeCheckedAt: null, // the runner couldn't read the visibility back
+    });
 
     db.videoProject.updateMany.mockResolvedValue({ count: 0 });
-    db.videoProject.findUnique.mockResolvedValue({ status: "PUBLISHED", youtubeVideoId: "dQw4w9WgXcQ" });
+    db.videoProject.findUnique.mockResolvedValue({ status: "PUBLISHED", youtubeVideoId: "dQw4w9WgXcQ", privacy: "PUBLIC" });
     await expect(handleRenderEvent({ event: "published", ...ids, youtubeVideoId: "dQw4w9WgXcQ" })).resolves.toEqual({ ok: true, ignored: true });
+  });
+
+  it("flags a video YouTube kept private although it should be visible", async () => {
+    db.videoProject.updateMany.mockResolvedValue({ count: 1 });
+    const publish = (privacy: string, visibility: { privacyStatus: "private" | "unlisted" | "public"; publishAt: string | null }) => {
+      db.videoProject.findUnique.mockResolvedValue({ status: "RENDERED", youtubeVideoId: null, privacy });
+      return handleRenderEvent({ event: "published", ...ids, youtubeVideoId: "dQw4w9WgXcQ", visibility });
+    };
+    const data = () => db.videoProject.updateMany.mock.calls.at(-1)![0].data;
+
+    await publish("UNLISTED", { privacyStatus: "private", publishAt: null });
+    expect(data()).toMatchObject({ status: "PUBLISHED", youtubeLocked: true, youtubeCheckedAt: expect.any(Date) });
+
+    await publish("PUBLIC", { privacyStatus: "private", publishAt: new Date(Date.now() + 86_400_000).toISOString() });
+    expect(data().youtubeLocked).toBe(false); // scheduled: private until its slot
+
+    await publish("PRIVATE", { privacyStatus: "private", publishAt: null });
+    expect(data().youtubeLocked).toBe(false); // private was asked for
   });
 
   it("fails a render but only annotates a publish failure", async () => {

@@ -32,7 +32,7 @@ function stubFetch(...responses: Array<Response | Error>) {
 }
 
 const started = () => new Response(null, { status: 200, headers: { location: SESSION } });
-const done = (id = "dQw4w9WgXcQ") => new Response(JSON.stringify({ id }), { status: 200 });
+const done = (id = "dQw4w9WgXcQ", status?: object) => new Response(JSON.stringify({ id, status }), { status: 200 });
 const partial = (lastByte: number) => new Response(null, { status: 308, headers: { range: `bytes=0-${lastByte}` } });
 const bodyText = (init?: RequestInit) => Buffer.from(init?.body as Uint8Array).toString();
 
@@ -44,9 +44,17 @@ describe("nextOffsetFromRange", () => {
 });
 
 describe("uploadVideoToYouTube", () => {
+  it("returns the visibility YouTube applied", async () => {
+    stubFetch(started(), done("dQw4w9WgXcQ", { privacyStatus: "private", uploadStatus: "uploaded" }));
+    await expect(uploadVideoToYouTube({ filePath, metadata: METADATA, accessToken: "t" })).resolves.toEqual({
+      videoId: "dQw4w9WgXcQ",
+      visibility: { privacyStatus: "private", publishAt: null },
+    });
+  });
+
   it("opens a resumable session with the metadata and uploads the file", async () => {
     const fetchMock = stubFetch(started(), done());
-    await expect(uploadVideoToYouTube({ filePath, metadata: METADATA, accessToken: "ya29.x" })).resolves.toEqual({ videoId: "dQw4w9WgXcQ" });
+    await expect(uploadVideoToYouTube({ filePath, metadata: METADATA, accessToken: "ya29.x" })).resolves.toEqual({ videoId: "dQw4w9WgXcQ", visibility: null });
 
     const [initUrl, init] = fetchMock.mock.calls[0];
     expect(initUrl).toContain("uploadType=resumable&part=snippet,status");

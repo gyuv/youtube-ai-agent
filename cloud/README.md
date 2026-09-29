@@ -96,11 +96,22 @@ one-hour YouTube access token (the refresh token never leaves the app).
 | GitHub Actions: free for public repos; 2,000 min/month for private repos (Free plan) | a 60s Short takes a few minutes including setup |
 | YouTube Data API: 10,000 units/day; each upload costs 1,600 | about 6 uploads per day per Google Cloud project |
 | Google OAuth consent screen in **Testing** mode | refresh tokens expire after 7 days; publish the app (unverified is fine for your own channel) |
+| Google Cloud project without the YouTube API Services audit | every API upload is locked **private**; the studio flags these (see below) |
 | Remotion | free for individuals and companies of up to 3 people; others set `REMOTION_LICENSE_KEY` |
 
 Uploads are marked `containsSyntheticMedia: true` because the voice and imagery are AI-generated,
-which YouTube asks creators to disclose. Scheduled projects (`scheduledFor`) upload as private
-with `publishAt`, and YouTube makes them public at that time.
+which YouTube asks creators to disclose. Scheduled **public** projects (`scheduledFor`) upload as
+private with `publishAt`, and YouTube makes them public at that time. Private and unlisted projects
+upload with that visibility straight away, because a YouTube schedule always ends public.
+
+After each upload the renderer reads the video's visibility back from YouTube (1 quota unit). If a
+video that should be public or unlisted comes back private, the project is flagged **locked
+private**: the studio explains why, the dashboard counts it under *Needs attention*, and the
+Actions log shows a warning. This is YouTube's rule for Google Cloud projects created after July
+2020 that haven't passed the [YouTube API Services audit](https://support.google.com/youtube/contact/yt_api_form).
+Apply for it with the project that holds your OAuth client; until it's approved, upload the rendered
+MP4 yourself in YouTube Studio. **Check visibility** on a published project reads it again, and the
+autopilot re-checks its scheduled videos once their slot has passed.
 
 ## Checks
 
@@ -138,7 +149,8 @@ Guard rails:
 - Each video gets 3 attempts; after that it's parked as *Failed* with the reason, and planning on
   that channel pauses for 12 hours so a systemic problem (bad key, quota) doesn't pile up failures.
 - *Review mode* stops at "Assets ready" so you approve each video with Dispatch Cloud Render.
-- With auto-publish on, the renderer uploads the video as private with `publishAt` = the slot.
+- With auto-publish on, a public video uploads as private with `publishAt` = the slot; after the
+  slot the autopilot checks it really went public.
 - Every step is logged in the dashboard's Autopilot panel (kept 30 days); **Run now** starts a
   run immediately.
 

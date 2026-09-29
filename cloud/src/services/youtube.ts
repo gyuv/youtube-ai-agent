@@ -1,11 +1,13 @@
 import { SCENE_TAIL_SECONDS } from "../../remotion/timeline";
 import type { Channel, Scene, VideoProject } from "@/generated/prisma/client";
+import { ProjectStatus, type PrivacyStatus } from "@/generated/prisma/enums";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { optionalEnv, requireEnv } from "@/lib/env";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import type { YouTubeVideoMetadata } from "./renderContract";
 import { ScriptSchema, buildChapters } from "./scriptGenerator";
+import { fetchVideoVisibility, isLockedPrivate, type ReportedVisibility, type Visibility } from "./youtubeVisibility";
 
 /** youtube.upload publishes; youtube.readonly identifies the connected channel. */
 export const YOUTUBE_SCOPES = [
@@ -90,7 +92,10 @@ export function buildYouTubeMetadata(
     description = `${description}\n\n#Shorts`.trim();
   }
 
-  const scheduled = project.scheduledFor && project.scheduledFor.getTime() > now.getTime() + 5 * 60_000;
+  // Only public videos are scheduled: YouTube makes a video public at publishAt, so scheduling a
+  // private or unlisted one would publish it wider than the operator chose.
+  const scheduled =
+    project.privacy === "PUBLIC" && project.scheduledFor && project.scheduledFor.getTime() > now.getTime() + 5 * 60_000;
   return {
     snippet: {
       title,
@@ -102,11 +107,41 @@ export function buildYouTubeMetadata(
     },
     status: {
       // YouTube only honours publishAt on private videos; it flips them public at that time.
-      privacyStatus: scheduled ? "private" : (project.privacy.toLowerCase() as "private" | "unlisted" | "public"),
+      privacyStatus: scheduled ? "private" : wantedVisibility(project.privacy),
       ...(scheduled ? { publishAt: project.scheduledFor!.toISOString() } : {}),
       selfDeclaredMadeForKids: false,
       // AI voice and AI imagery: YouTube asks creators to disclose realistic synthetic media.
       containsSyntheticMedia: true,
     },
   };
+}
+
+export function wantedVisibility(privacy: PrivacyStatus): Visibility {
+  return privacy.toLowerCase() as Visibility;
+}
+
+/**
+ * Read a published video's visibility back from YouTube and record whether it is locked private.
+ * Run from the studio's "Check visibility" button and by the autopilot after a scheduled slot.
+ */
+export async function checkYouTubeVisibility(
+  projectId: string,
+  now: Date = new Date(),
+): Promise<{ visibility: ReportedVisibility | null; locked: boolean }> {
+  const project = await prisma.videoProject.findUnique({ where: { id: projectId }, include: { channel: true } });
+  if (!project) throw new PipelineError("NOT_FOUND", `Project ${projectId} not found.`);
+  if (project.status !== ProjectStatus.PUBLISHED || !project.youtubeVideoId) {
+    throw new PipelineError("CONFLICT", "This video isn't on YouTube yet.");
+  }
+
+  const accessToken = await getChannelAccessToken(project.channel);
+  let visibility: ReportedVisibility | null;
+  try {
+    visibility = await fetchVideoVisibility(project.youtubeVideoId, accessToken);
+  } catch (error) {
+    throw new PipelineError("PROVIDER", errorMessage(error), { cause: error });
+  }
+  const locked = visibility ? isLockedPrivate(wantedVisibility(project.privacy), visibility, now) : false;
+  await prisma.videoProject.update({ where: { id: projectId }, data: { youtubeLocked: locked, youtubeCheckedAt: now } });
+  return { visibility, locked };
 }

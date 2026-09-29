@@ -6,7 +6,7 @@ import { z } from "zod";
  *
  *   runner ── started ──▶ app   returns the RenderJob (scenes + a signed upload URL)
  *   runner ── rendered ─▶ app   mp4 uploaded; returns YouTube publish instructions if auto-publish
- *   runner ── published ▶ app   YouTube video id
+ *   runner ── published ▶ app   YouTube video id + the visibility YouTube reports
  *   runner ── failed ───▶ app   any stage failed (also sent by the workflow if the job dies)
  */
 
@@ -25,7 +25,15 @@ export const RenderEventSchema = z.discriminatedUnion("event", [
     sizeBytes: z.number().int().positive(),
     durationSeconds: z.number().positive(),
   }),
-  z.object({ event: z.literal("published"), ...base, youtubeVideoId: z.string().regex(/^[\w-]{6,20}$/) }),
+  z.object({
+    event: z.literal("published"),
+    ...base,
+    youtubeVideoId: z.string().regex(/^[\w-]{6,20}$/),
+    /** Visibility YouTube reports after the upload; absent when it couldn't be read back. */
+    visibility: z
+      .object({ privacyStatus: z.enum(["private", "unlisted", "public"]), publishAt: z.iso.datetime({ offset: true }).nullable() })
+      .optional(),
+  }),
   z.object({
     event: z.literal("failed"),
     ...base,

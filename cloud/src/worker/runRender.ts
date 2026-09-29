@@ -4,6 +4,7 @@ import { bundle } from "@remotion/bundler";
 import { ensureBrowser, getVideoMetadata, renderMedia, selectComposition } from "@remotion/renderer";
 import { COMPOSITION_ID } from "../../remotion/timeline";
 import type { RenderJob } from "@/services/renderContract";
+import { AUDIT_FORM_URL, fetchVideoVisibility, isLockedPrivate, type ReportedVisibility } from "@/services/youtubeVisibility";
 import { prepareRenderProps } from "./assets";
 import { planEncoding } from "./encoding";
 import { RenderWebhookClient } from "./webhookClient";
@@ -93,6 +94,26 @@ async function uploadRender(upload: RenderJob["upload"], filePath: string): Prom
   throw new Error(`Uploading the render to storage failed: ${lastError}`);
 }
 
+/** What YouTube actually applied; a fresh read wins over the upload response. Never fails the publish. */
+async function readBackVisibility(videoId: string, accessToken: string, fromUpload: ReportedVisibility | null) {
+  try {
+    return (await fetchVideoVisibility(videoId, accessToken)) ?? fromUpload;
+  } catch (error) {
+    log(`Could not read the video's visibility back: ${error instanceof Error ? error.message : String(error)}`);
+    return fromUpload;
+  }
+}
+
+function warnIfLockedPrivate(requested: { privacyStatus: string; publishAt?: string }, reported: ReportedVisibility) {
+  const wanted = requested.publishAt ? "public" : (requested.privacyStatus as ReportedVisibility["privacyStatus"]);
+  log(`YouTube reports the video as ${reported.privacyStatus}${reported.publishAt ? `, scheduled for ${reported.publishAt}` : ""}`);
+  if (!isLockedPrivate(wanted, reported)) return;
+  const message =
+    `YouTube kept this video private although ${wanted} was requested. Uploads from a Google Cloud project that ` +
+    `hasn't passed the YouTube API Services audit are locked private; apply at ${AUDIT_FORM_URL}`;
+  console.log(process.env.GITHUB_ACTIONS === "true" ? `::warning title=Video locked private::${message}` : `[render] ${message}`);
+}
+
 export type RenderOutcome =
   | { outcome: "rendered"; videoUrl: string; sizeBytes: number }
   | { outcome: "published"; videoUrl: string; sizeBytes: number; youtubeVideoId: string };
@@ -173,13 +194,13 @@ export async function runRender(config: WorkerConfig): Promise<RenderOutcome> {
     // Redact the token from the Actions log if anything ever prints it.
     if (process.env.GITHUB_ACTIONS === "true") console.log(`::add-mask::${rendered.publish.accessToken}`);
     log(`Uploading to YouTube (${rendered.publish.metadata.status.privacyStatus})`);
-    const { videoId } = await uploadVideoToYouTube({
-      filePath: output,
-      metadata: rendered.publish.metadata,
-      accessToken: rendered.publish.accessToken,
-    });
-    await client.published({ youtubeVideoId: videoId });
+    const { metadata, accessToken } = rendered.publish;
+    const upload = await uploadVideoToYouTube({ filePath: output, metadata, accessToken });
+    const videoId = upload.videoId;
+    const visibility = await readBackVisibility(videoId, accessToken, upload.visibility);
+    await client.published({ youtubeVideoId: videoId, ...(visibility ? { visibility } : {}) });
     log(`Published https://youtu.be/${videoId}`);
+    if (visibility) warnIfLockedPrivate(metadata.status, visibility);
     return { outcome: "published", videoUrl: rendered.videoUrl, sizeBytes: size, youtubeVideoId: videoId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

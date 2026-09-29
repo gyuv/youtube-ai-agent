@@ -44,6 +44,15 @@ describe("POST /api/render/webhook", () => {
     expect(handleRenderEvent).not.toHaveBeenCalled();
   });
 
+  it("accepts the visibility YouTube reported with a published event", async () => {
+    handleRenderEvent.mockResolvedValue({ ok: true });
+    const published = { event: "published", projectId: EVENT.projectId, runId: EVENT.runId, youtubeVideoId: "dQw4w9WgXcQ" };
+    const visibility = { privacyStatus: "private", publishAt: "2026-10-02T12:30:00Z" };
+    expect((await call({ ...published, visibility })).status).toBe(200);
+    expect(handleRenderEvent).toHaveBeenCalledWith({ ...published, visibility });
+    expect((await call({ ...published, visibility: { privacyStatus: "secret", publishAt: null } })).status).toBe(400);
+  });
+
   it("passes valid events to the handler and returns its result", async () => {
     handleRenderEvent.mockResolvedValue({ ok: true });
     const res = await call(EVENT);

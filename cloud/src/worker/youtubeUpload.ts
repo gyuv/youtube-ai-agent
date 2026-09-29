@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { YouTubeVideoMetadata } from "@/services/renderContract";
+import { readVisibility, type ReportedVisibility } from "@/services/youtubeVisibility";
 
 /**
  * YouTube Data API v3 resumable upload (videos.insert, 1600 quota units of the free 10,000/day).
@@ -43,7 +44,7 @@ export async function uploadVideoToYouTube(input: {
   accessToken: string;
   maxAttempts?: number;
   retryDelayMs?: number;
-}): Promise<{ videoId: string }> {
+}): Promise<{ videoId: string; visibility: ReportedVisibility | null }> {
   const file = await readFile(input.filePath);
   const size = file.length;
   const auth = { Authorization: `Bearer ${input.accessToken}` };
@@ -79,7 +80,7 @@ export async function uploadVideoToYouTube(input: {
       if (res.status === 200 || res.status === 201) {
         const video = (await res.json()) as { id?: string };
         if (!video.id) throw new YouTubeUploadError("YouTube accepted the upload but returned no video id", res.status);
-        return { videoId: video.id };
+        return { videoId: video.id, visibility: readVisibility(video) };
       }
       if (res.status === 308) {
         offset = nextOffsetFromRange(res.headers.get("range"));
@@ -97,7 +98,7 @@ export async function uploadVideoToYouTube(input: {
     const probe = await fetch(sessionUrl, { method: "PUT", headers: { ...auth, "Content-Range": `bytes */${size}` } }).catch(() => null);
     if (probe?.status === 200 || probe?.status === 201) {
       const video = (await probe.json()) as { id?: string };
-      if (video.id) return { videoId: video.id };
+      if (video.id) return { videoId: video.id, visibility: readVisibility(video) };
     }
     if (probe?.status === 308) offset = nextOffsetFromRange(probe.headers.get("range"));
   }

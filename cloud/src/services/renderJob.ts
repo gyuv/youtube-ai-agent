@@ -5,7 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { createSignedUpload, maxObjectBytes, publicObjectUrl } from "@/lib/storage";
 import { sceneHasAssets } from "./pipeline";
 import type { AckResponse, RenderEvent, RenderJob, RenderedResponse, StartedResponse } from "./renderContract";
-import { buildYouTubeMetadata, getChannelAccessToken } from "./youtube";
+import { buildYouTubeMetadata, getChannelAccessToken, wantedVisibility } from "./youtube";
+import { isLockedPrivate } from "./youtubeVisibility";
 
 /**
  * Server side of the render webhook. Every transition is a guarded `updateMany` so a stale or
@@ -120,16 +121,27 @@ async function onRendered(e: Extract<RenderEvent, { event: "rendered" }>): Promi
 }
 
 async function onPublished(e: Extract<RenderEvent, { event: "published" }>): Promise<AckResponse> {
-  const done = await prisma.videoProject.updateMany({
-    where: { id: e.projectId, status: ProjectStatus.RENDERED, renderRunId: e.runId },
-    data: { status: ProjectStatus.PUBLISHED, youtubeVideoId: e.youtubeVideoId, publishedAt: new Date(), lastError: null },
-  });
-  if (done.count > 0) return { ok: true };
   const project = await prisma.videoProject.findUnique({
     where: { id: e.projectId },
-    select: { status: true, youtubeVideoId: true },
+    select: { status: true, youtubeVideoId: true, privacy: true },
   });
-  if (project?.status === ProjectStatus.PUBLISHED && project.youtubeVideoId === e.youtubeVideoId) {
+  if (!project) throw new PipelineError("NOT_FOUND", `Project ${e.projectId} not found.`);
+
+  const now = new Date();
+  const done = await prisma.videoProject.updateMany({
+    where: { id: e.projectId, status: ProjectStatus.RENDERED, renderRunId: e.runId },
+    data: {
+      status: ProjectStatus.PUBLISHED,
+      youtubeVideoId: e.youtubeVideoId,
+      publishedAt: now,
+      lastError: null,
+      // Uploads from an unaudited Google Cloud project come back private whatever was asked for.
+      youtubeLocked: e.visibility ? isLockedPrivate(wantedVisibility(project.privacy), e.visibility, now) : false,
+      youtubeCheckedAt: e.visibility ? now : null,
+    },
+  });
+  if (done.count > 0) return { ok: true };
+  if (project.status === ProjectStatus.PUBLISHED && project.youtubeVideoId === e.youtubeVideoId) {
     return { ok: true, ignored: true }; // duplicate delivery
   }
   throw new PipelineError("CONFLICT", "Project is not awaiting publication from this run.");
