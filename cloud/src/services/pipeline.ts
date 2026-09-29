@@ -3,6 +3,7 @@ import { Prisma, type Scene } from "@/generated/prisma/client";
 import { ProjectStatus, VisualSource } from "@/generated/prisma/enums";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
+import { EDITABLE_STATUSES, RENDERABLE_STATUSES } from "@/lib/statuses";
 import { uploadObject } from "@/lib/storage";
 import { dispatchRenderWorkflow } from "./renderDispatcher";
 import { estimateSpeechSeconds, generateScript } from "./scriptGenerator";
@@ -14,16 +15,8 @@ import { canvasFor, findStockVisual, generatePollinationsImage } from "./visualF
  * The provider services stay pure; this module owns status transitions and storage paths.
  */
 
-/** States where operators may change scenes. In-flight renders and published videos are frozen. */
-const EDITABLE: ProjectStatus[] = [
-  ProjectStatus.DRAFT,
-  ProjectStatus.SCRIPTED,
-  ProjectStatus.ASSETS_READY,
-  ProjectStatus.RENDERED,
-  ProjectStatus.FAILED,
-];
-/** States from which a (re-)render may be dispatched. */
-const RENDERABLE: ProjectStatus[] = [ProjectStatus.ASSETS_READY, ProjectStatus.RENDERED, ProjectStatus.FAILED];
+const EDITABLE = [...EDITABLE_STATUSES];
+const RENDERABLE = [...RENDERABLE_STATUSES];
 /** States whose status follows scene completeness after an edit. */
 const ASSET_TRACKED: ProjectStatus[] = [
   ProjectStatus.SCRIPTED,
@@ -243,6 +236,42 @@ export async function regenerateSceneVisual(sceneId: string, request: VisualRequ
 // ─────────────────────────────────────────────────────────────
 // Bulk assets
 // ─────────────────────────────────────────────────────────────
+
+export interface SceneFillResult {
+  sceneIndex: number;
+  skipped: "locked" | null;
+  generated: Array<"audio" | "visual">;
+  errors: string[];
+}
+
+/**
+ * Fill whatever one scene is missing (voice, then visual). The studio calls this scene by scene
+ * so each request stays well inside a serverless time limit and the operator sees progress.
+ */
+export async function fillSceneAssets(sceneId: string, options: { visualSource?: VisualRequest["source"] } = {}): Promise<SceneFillResult> {
+  const scene = await prisma.scene.findUnique({ where: { id: sceneId } });
+  if (!scene) throw new PipelineError("NOT_FOUND", `Scene ${sceneId} not found.`);
+  const result: SceneFillResult = { sceneIndex: scene.sceneIndex, skipped: null, generated: [], errors: [] };
+  if (scene.locked) return { ...result, skipped: "locked" };
+
+  if (!scene.voiceAudioUrl) {
+    try {
+      await regenerateSceneAudio(sceneId);
+      result.generated.push("audio");
+    } catch (error) {
+      result.errors.push(`Voice: ${errorMessage(error)}`);
+    }
+  }
+  if (!scene.imageUrl && !scene.videoClipUrl) {
+    try {
+      await regenerateSceneVisual(sceneId, { source: options.visualSource });
+      result.generated.push("visual");
+    } catch (error) {
+      result.errors.push(`Visual: ${errorMessage(error)}`);
+    }
+  }
+  return result;
+}
 
 export interface AssetRunSummary {
   generated: number;

@@ -98,7 +98,7 @@ function SceneView({ scene, index, format, captions }: { scene: VideoScene; inde
       ) : scene.imageSrc ? (
         <KenBurns src={scene.imageSrc} index={index} />
       ) : null}
-      <Audio src={resolveSrc(scene.audioSrc)} />
+      {scene.audioSrc ? <Audio src={resolveSrc(scene.audioSrc)} /> : null}
       {captions && scene.words.length > 0 ? <Captions scene={scene} format={format} /> : null}
     </AbsoluteFill>
   );

@@ -17,8 +17,8 @@ export type CaptionWord = {
 };
 
 export type VideoScene = {
-  /** Absolute URL or a file name inside the bundle's public dir. */
-  audioSrc: string;
+  /** Absolute URL or a file name inside the bundle's public dir. Null only in studio previews. */
+  audioSrc: string | null;
   imageSrc: string | null;
   videoSrc: string | null;
   /** Length of the B-roll clip, so short clips can loop. Unknown in previews. */

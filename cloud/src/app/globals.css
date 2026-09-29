@@ -80,3 +80,17 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+/* Caption fonts for the in-browser Remotion preview (renders bundle their own copies). */
+@font-face {
+  font-family: "LumenCaption";
+  src: url("/fonts/montserrat-latin-800.woff2") format("woff2");
+  font-weight: 800;
+  font-display: block;
+}
+@font-face {
+  font-family: "Noto Sans Devanagari";
+  src: url("/fonts/noto-sans-devanagari-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: block;
+}

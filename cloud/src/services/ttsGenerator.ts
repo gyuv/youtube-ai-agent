@@ -1,6 +1,7 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import type { Readable } from "node:stream";
 import { PipelineError, errorMessage } from "@/lib/errors";
+import { DEFAULT_VOICE, isValidVoice } from "@/lib/voices";
 
 /**
  * Free neural voiceover through Microsoft Edge's Read Aloud service (the engine behind the
@@ -8,27 +9,7 @@ import { PipelineError, errorMessage } from "@/lib/errors";
  * function or a GitHub Actions runner with no Python and no API key.
  */
 
-export const DEFAULT_VOICE = "en-US-AriaNeural";
-
-/** Curated voices for the studio picker. Any valid edge-tts ShortName also works. */
-export const EDGE_VOICES = [
-  { id: "en-US-AriaNeural", label: "Aria (US, female)" },
-  { id: "en-US-AndrewNeural", label: "Andrew (US, male)" },
-  { id: "en-US-EmmaNeural", label: "Emma (US, female)" },
-  { id: "en-US-BrianNeural", label: "Brian (US, male)" },
-  { id: "en-US-ChristopherNeural", label: "Christopher (US, male, documentary)" },
-  { id: "en-US-JennyNeural", label: "Jenny (US, female)" },
-  { id: "en-GB-SoniaNeural", label: "Sonia (UK, female)" },
-  { id: "en-GB-RyanNeural", label: "Ryan (UK, male)" },
-  { id: "en-AU-NatashaNeural", label: "Natasha (Australia, female)" },
-  { id: "en-IN-NeerjaNeural", label: "Neerja (India, female)" },
-  { id: "en-IN-PrabhatNeural", label: "Prabhat (India, male)" },
-  { id: "hi-IN-SwaraNeural", label: "Swara (Hindi, female)" },
-  { id: "hi-IN-MadhurNeural", label: "Madhur (Hindi, male)" },
-  { id: "es-ES-ElviraNeural", label: "Elvira (Spanish, female)" },
-  { id: "de-DE-ConradNeural", label: "Conrad (German, male)" },
-  { id: "fr-FR-DeniseNeural", label: "Denise (French, female)" },
-] as const;
+export { DEFAULT_VOICE, EDGE_VOICES, isValidVoice } from "@/lib/voices";
 
 export interface WordTiming {
   word: string;
@@ -62,7 +43,6 @@ const MP3_BITS_PER_SECOND = 96_000;
 const TICKS_PER_MS = 10_000; // edge-tts offsets are in 100-nanosecond ticks
 
 // These values are interpolated into SSML attributes by msedge-tts, so they must be strictly shaped.
-const VOICE_PATTERN = /^[a-z]{2,3}(-[A-Za-z0-9]+)+Neural$/;
 const RATE_PATTERN = /^[+-]\d{1,3}%$/;
 const PITCH_PATTERN = /^[+-]\d{1,3}Hz$/;
 
@@ -148,7 +128,7 @@ export async function synthesizeSpeech(
       `Narration is ${narration.length} characters; split the scene (max ${MAX_NARRATION_CHARS}).`,
     );
   }
-  if (!VOICE_PATTERN.test(voice)) throw new PipelineError("CONFLICT", `"${voice}" is not a valid edge-tts voice name.`);
+  if (!isValidVoice(voice)) throw new PipelineError("CONFLICT", `"${voice}" is not a valid edge-tts voice name.`);
   if (!RATE_PATTERN.test(rate)) throw new PipelineError("CONFLICT", `Rate must look like "+10%", got "${rate}".`);
   if (!PITCH_PATTERN.test(pitch)) throw new PipelineError("CONFLICT", `Pitch must look like "+2Hz", got "${pitch}".`);
 

@@ -19,6 +19,7 @@ does no rendering and runs no scripts; it only needs a browser.
 ```
 cloud/
 ├── prisma/schema.prisma   Channel, VideoProject, Scene
+├── prisma/migrations/     initial tables + row-level security
 ├── prisma.config.ts       Prisma CLI config (migrations use DIRECT_URL)
 ├── remotion/              the video composition: scenes, Ken Burns, B-roll, captions
 ├── scripts/               render-worker.ts (runs on GitHub Actions), render-smoke.ts
@@ -115,18 +116,50 @@ DRAFT -> SCRIPTED -> ASSETS_READY -> QUEUED_FOR_RENDER -> RENDERING -> RENDERED 
                                          any stage can move to FAILED (see VideoProject.lastError)
 ```
 
+## Studio
+
+| Screen | What it's for |
+| --- | --- |
+| **Dashboard** `/` | Counts by stage, a filterable pipeline table (scenes ready per video) and the next 7 days of posting slots. Open slots link straight to a new video for that time. |
+| **Channels** `/channels` | Niche, audience, voice, format, script and visual style, posting cron with a live preview of the next slots, auto-publish, and **Connect YouTube**. |
+| **New video** `/projects/new` | Topic, channel, format, and "next free slot" / custom time. Optionally writes the script with Gemini immediately. |
+| **Scene Repair Studio** `/projects/[id]` | Live preview of the exact render composition (Remotion Player), a proportional timeline, and a card per scene: edit narration, regenerate its audio, regenerate its AI image or swap in stock B-roll, lock it. Toolbar: write/rewrite script, generate missing assets scene by scene with progress, **Dispatch Cloud Render**. The page follows the render live. |
+
+Everything except `/login` and the runner's webhook requires the studio password. The session is
+an HMAC-signed cookie; server actions and API routes re-check it on every call.
+
+## Connecting YouTube
+
+1. [Google Cloud Console](https://console.cloud.google.com/): create a project and enable
+   **YouTube Data API v3**.
+2. OAuth consent screen: type *External*, add the scopes `youtube.upload` and
+   `youtube.readonly`, add your Google account as a test user, then **Publish app**. Apps left in
+   *Testing* get refresh tokens that expire after 7 days; an unverified published app works for
+   your own channel after a warning screen.
+3. Credentials → *OAuth client ID* → *Web application*. Authorized redirect URIs:
+   `https://<your-app>/api/oauth/google/callback` (and `http://localhost:3000/api/oauth/google/callback` for local dev).
+4. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` and
+   `TOKEN_ENCRYPTION_KEY`, then use **Connect YouTube** on the channel page.
+
+## Database
+
+`prisma/migrations` creates the tables and enables row-level security on each of them. Supabase
+publishes the `public` schema through its Data API; RLS with no policies keeps that API out,
+while the app (connecting as the table owner through Prisma) is unaffected.
+
 ## Local setup
 
 ```bash
 cd cloud
-cp .env.example .env          # add your Supabase connection strings
+cp .env.example .env          # at minimum DATABASE_URL, DIRECT_URL, STUDIO_PASSWORD, SESSION_SECRET
 npm install                   # also runs `prisma generate`
-npm run db:migrate -- --name init
-npm run dev
+npm run db:deploy             # apply prisma/migrations
+npm run dev                   # http://localhost:3000
 ```
 
 ## Deploying to Vercel
 
 1. Import the repository in Vercel and set **Root Directory** to `cloud`.
 2. Add the variables from `.env.example` under Project Settings → Environment Variables.
-3. Run `npm run db:deploy` once from your machine or a CI job to apply migrations to Supabase.
+3. Run `npm run db:deploy` once (locally with `DIRECT_URL` set) to create the tables in Supabase.
+4. Add `APP_URL` and `RENDER_WEBHOOK_SECRET` as GitHub repository secrets (see *Cloud renderer*).
