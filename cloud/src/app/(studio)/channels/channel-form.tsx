@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle } from "lucide-react";
+import { Bot, LoaderCircle } from "lucide-react";
 import { startTransition, useActionState, useMemo, useState, type FormEvent } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { FieldHint, Input, Label, Select, Switch, Textarea } from "@/components/ui/form-controls";
 import type { Channel } from "@/generated/prisma/client";
 import { useClientValue } from "@/lib/use-client-value";
+import { cn } from "@/lib/utils";
 import { DEFAULT_VOICE, EDGE_VOICES } from "@/lib/voices";
 import { formatSlot, isValidCron, isValidTimeZone, nextPostingTimes } from "@/services/schedule";
 import { saveChannelAction, type ChannelFormState } from "./actions";
@@ -27,6 +28,11 @@ type ChannelFields = Pick<
   | "postingTimezone"
   | "autoPublish"
   | "isActive"
+  | "autopilot"
+  | "autopilotReview"
+  | "autopilotLeadHours"
+  | "autopilotVisualSource"
+  | "topicBacklog"
 >;
 
 const CRON_PRESETS = [
@@ -61,6 +67,7 @@ export function ChannelForm({ channelId, initial, youtubeConnected }: { channelI
   const [editedTimeZone, setTimeZone] = useState<string | null>(initial?.postingTimezone ?? null);
   const timeZone = editedTimeZone ?? browserTimeZone;
   const [autoPublish, setAutoPublish] = useState(initial?.autoPublish ?? false);
+  const [autopilot, setAutopilot] = useState(initial?.autopilot ?? false);
 
   const timeZones = useMemo(() => (typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : []), []);
   const preview = useMemo(() => {
@@ -212,6 +219,48 @@ export function ChannelForm({ channelId, initial, youtubeConnected }: { channelI
               Channel is active (shows its slots on the dashboard)
             </Label>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Bot className="size-4" /> Autopilot
+            </CardTitle>
+            <CardDescription className="mt-1.5">
+              Fills each open posting slot on its own: picks a topic, writes the script, voices and illustrates every scene,
+              renders on GitHub Actions and, with auto-publish on, schedules the upload for the slot.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-5">
+          <Label className="font-normal">
+            <Switch name="autopilot" checked={autopilot} onChange={(e) => setAutopilot(e.target.checked)} />
+            Run this channel on autopilot
+          </Label>
+          {/* Dimmed rather than disabled: disabled fields aren't submitted, which would wipe the backlog. */}
+          <div className={cn("grid gap-5 transition-opacity", !autopilot && "opacity-60")}>
+            <Label className="font-normal">
+              <Switch name="autopilotReview" defaultChecked={initial?.autopilotReview ?? false} />
+              Let me review each video before it renders
+            </Label>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field id="autopilotLeadHours" label="Start production" error={errors.autopilotLeadHours} hint="Hours before a slot; leave time for review and rendering">
+                <Input id="autopilotLeadHours" name="autopilotLeadHours" type="number" min={6} max={168} defaultValue={initial?.autopilotLeadHours ?? 36} />
+              </Field>
+              <Field id="autopilotVisualSource" label="Visuals">
+                <Select id="autopilotVisualSource" name="autopilotVisualSource" defaultValue={initial?.autopilotVisualSource === "PEXELS" ? "PEXELS" : "POLLINATIONS"}>
+                  <option value="POLLINATIONS">AI images (Pollinations)</option>
+                  <option value="PEXELS">Stock B-roll (Pexels)</option>
+                </Select>
+              </Field>
+            </div>
+            <Field id="topicBacklog" label="Topic backlog" error={errors.topicBacklog} hint="One topic per line, used first and in order. When it runs out, Gemini suggests topics that don't repeat earlier videos.">
+              <Textarea id="topicBacklog" name="topicBacklog" defaultValue={initial?.topicBacklog ?? ""} rows={4} placeholder={"How UPI changed small shops\nIs gold still worth buying in 2026?"} />
+            </Field>
+          </div>
+          {autopilot && !cron.trim() ? <FieldHint className="text-amber-600 dark:text-amber-400">Autopilot needs a posting schedule above.</FieldHint> : null}
         </CardContent>
       </Card>
 

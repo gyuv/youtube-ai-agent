@@ -114,4 +114,11 @@ ALTER TABLE "Scene" ADD CONSTRAINT "Scene_projectId_fkey" FOREIGN KEY ("projectI
 ALTER TABLE "Channel" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "VideoProject" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "Scene" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "_prisma_migrations" ENABLE ROW LEVEL SECURITY;
+-- Prisma's own bookkeeping table exists when `migrate deploy` runs this, but not in the shadow
+-- database `migrate dev` replays migrations into, hence the guard.
+DO $$
+BEGIN
+  IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
+    ALTER TABLE "_prisma_migrations" ENABLE ROW LEVEL SECURITY;
+  END IF;
+END $$;

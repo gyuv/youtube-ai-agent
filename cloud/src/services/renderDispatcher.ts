@@ -36,7 +36,8 @@ const STATUS_HINTS: Record<number, string> = {
   422: "GitHub rejected the dispatch payload",
 };
 
-export async function dispatchRenderWorkflow(projectId: string): Promise<{ dispatchedAt: Date; workflowUrl: string }> {
+/** Fire a `repository_dispatch` event; the payload must stay small and free of secrets. */
+export async function dispatchRepositoryEvent(eventType: string, clientPayload: Record<string, string>): Promise<void> {
   const { owner, name } = repo();
   let res: Response;
   try {
@@ -49,7 +50,7 @@ export async function dispatchRenderWorkflow(projectId: string): Promise<{ dispa
         "User-Agent": "lumen-cloud",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ event_type: RENDER_EVENT_TYPE, client_payload: { project_id: projectId } }),
+      body: JSON.stringify({ event_type: eventType, client_payload: clientPayload }),
       signal: AbortSignal.timeout(15_000),
     });
   } catch (error) {
@@ -58,9 +59,23 @@ export async function dispatchRenderWorkflow(projectId: string): Promise<{ dispa
   }
 
   if (res.status !== 204) {
-    const detail = await res.text().catch(() => "");
+    const detail = (await res.text().catch(() => "")).replace(/\s+/g, " ").trim(); // one line for logs
     const hint = STATUS_HINTS[res.status] ? ` (${STATUS_HINTS[res.status]})` : "";
     throw new PipelineError("PROVIDER", `GitHub dispatch failed with ${res.status}${hint}: ${detail.slice(0, 200)}`);
   }
+}
+
+export async function dispatchRenderWorkflow(projectId: string): Promise<{ dispatchedAt: Date; workflowUrl: string }> {
+  await dispatchRepositoryEvent(RENDER_EVENT_TYPE, { project_id: projectId });
   return { dispatchedAt: new Date(), workflowUrl: actionsWorkflowUrl() };
+}
+
+export const AUTOPILOT_EVENT_TYPE = "autopilot";
+export const AUTOPILOT_WORKFLOW_FILE = "autopilot.yml";
+
+/** Start an autopilot run now instead of waiting for the next scheduled one. */
+export async function dispatchAutopilotRun(): Promise<{ workflowUrl: string }> {
+  await dispatchRepositoryEvent(AUTOPILOT_EVENT_TYPE, { requested_by: "studio" });
+  const { owner, name } = repo();
+  return { workflowUrl: `https://github.com/${owner}/${name}/actions/workflows/${AUTOPILOT_WORKFLOW_FILE}` };
 }

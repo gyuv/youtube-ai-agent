@@ -1,5 +1,6 @@
-import { AlertTriangle, CalendarClock, Clapperboard, Cog, Plus, Radio, Youtube } from "lucide-react";
+import { AlertTriangle, Bot, CalendarClock, Clapperboard, Cog, Plus, Radio, Youtube } from "lucide-react";
 import Link from "next/link";
+import { AutopilotPanel } from "@/components/autopilot-panel";
 import { PageHeader, timeAgo } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -39,7 +40,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <Stat icon={<Youtube />} label="Published, 30 days" value={data.stats.publishedThisMonth} href="/?view=published" />
       </div>
 
-      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="mt-8 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <Card className="min-w-0 gap-0 py-0">
           <CardHeader className="flex-wrap items-center py-4">
             <CardTitle>Pipelines</CardTitle>
@@ -89,7 +90,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           )}
         </Card>
 
-        <ScheduleCard schedule={data.schedule} />
+        <div className="grid min-w-0 grid-cols-1 content-start gap-6">
+          <AutopilotPanel
+            channelsOn={data.autopilot.channelsOn}
+            events={data.autopilot.events.map((e) => ({ id: e.id, action: e.action, level: e.level, message: e.message, projectId: e.projectId, ago: timeAgo(e.createdAt) }))}
+          />
+          <ScheduleCard schedule={data.schedule} />
+        </div>
       </div>
     </>
   );
@@ -117,8 +124,15 @@ function ProjectRow({ project }: { project: DashboardData["projects"][number] })
         <Link href={`/projects/${project.id}`} className="block truncate font-medium after:absolute after:inset-0">
           {project.title ?? project.topic}
         </Link>
-        <div className="truncate text-xs text-muted-foreground">
-          {project.channelName} · {project.format === "SHORT" ? "Short 9:16" : "Long-form 16:9"}
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          {project.autopilot ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded border px-1 text-[10px] font-medium text-foreground" title="Created by the autopilot">
+              <Bot className="size-3" /> Auto
+            </span>
+          ) : null}
+          <span className="truncate">
+            {project.channelName} · {project.format === "SHORT" ? "Short 9:16" : "Long-form 16:9"}
+          </span>
         </div>
       </TableCell>
       <TableCell>
@@ -138,7 +152,7 @@ function ProjectRow({ project }: { project: DashboardData["projects"][number] })
           </div>
         )}
       </TableCell>
-      <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
+      <TableCell className="hidden text-xs whitespace-nowrap text-muted-foreground md:table-cell">
         {project.scheduledFor ? formatSlot(project.scheduledFor, project.timeZone) : "Not scheduled"}
       </TableCell>
       <TableCell className="hidden pr-5 text-right text-xs whitespace-nowrap text-muted-foreground sm:table-cell">{timeAgo(project.updatedAt)}</TableCell>
@@ -146,9 +160,11 @@ function ProjectRow({ project }: { project: DashboardData["projects"][number] })
   );
 }
 
+const SCHEDULE_LIMIT = 12;
+
 function ScheduleCard({ schedule }: { schedule: DashboardData["schedule"] }) {
   const days = new Map<string, DashboardData["schedule"]>();
-  for (const entry of schedule) {
+  for (const entry of schedule.slice(0, SCHEDULE_LIMIT)) {
     const key = new Intl.DateTimeFormat("en-GB", { timeZone: entry.channel.postingTimezone, weekday: "long", day: "numeric", month: "short" }).format(entry.at);
     days.set(key, [...(days.get(key) ?? []), entry]);
   }
@@ -199,6 +215,11 @@ function ScheduleCard({ schedule }: { schedule: DashboardData["schedule"] }) {
             </div>
           ))
         )}
+        {schedule.length > SCHEDULE_LIMIT ? (
+          <p className="text-xs text-muted-foreground">
+            and {schedule.length - SCHEDULE_LIMIT} more slot{schedule.length - SCHEDULE_LIMIT === 1 ? "" : "s"} this week
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );

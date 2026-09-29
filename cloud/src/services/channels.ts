@@ -17,7 +17,8 @@ const optionalText = (max: number) =>
 /** HTML checkboxes submit "on" when ticked and nothing otherwise. */
 const checkbox = z.preprocess((value) => value === "on" || value === "true" || value === true, z.boolean());
 
-export const ChannelInputSchema = z.object({
+export const ChannelInputSchema = z
+  .object({
   name: z.string().trim().min(1, "Give the channel a name").max(80),
   niche: z.string().trim().min(2, "Describe the channel's niche").max(200),
   targetAudience: optionalText(300),
@@ -31,7 +32,16 @@ export const ChannelInputSchema = z.object({
   postingTimezone: z.string().trim().refine(isValidTimeZone, "Unknown time zone; use an IANA name such as Asia/Kolkata"),
   autoPublish: checkbox,
   isActive: checkbox,
-});
+  autopilot: checkbox,
+  autopilotReview: checkbox,
+  autopilotLeadHours: z.coerce.number().int().min(6, "At least 6 hours").max(168, "At most 7 days (168 hours)").default(36),
+  autopilotVisualSource: z.enum(["POLLINATIONS", "PEXELS"]).default("POLLINATIONS"),
+  topicBacklog: optionalText(10_000),
+})
+  .refine((c) => !c.autopilot || c.postingCron, {
+    message: "Autopilot fills posting slots, so it needs a posting schedule",
+    path: ["postingCron"],
+  });
 
 export type ChannelInput = z.infer<typeof ChannelInputSchema>;
 

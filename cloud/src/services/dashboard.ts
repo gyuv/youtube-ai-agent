@@ -1,5 +1,6 @@
 import { ProjectStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
+import { recentAutopilotEvents } from "./autopilot";
 import { sceneHasAssets } from "./pipeline";
 import { buildSchedule } from "./schedule";
 
@@ -14,7 +15,7 @@ export const ACTIVE_STATUSES: ProjectStatus[] = [
 
 export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
   const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const [channels, projects, byStatus, publishedThisMonth, scheduled] = await Promise.all([
+  const [channels, projects, byStatus, publishedThisMonth, scheduled, events] = await Promise.all([
     prisma.channel.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.videoProject.findMany({
       orderBy: { updatedAt: "desc" },
@@ -30,6 +31,7 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
       where: { scheduledFor: { gte: now } },
       select: { id: true, channelId: true, title: true, topic: true, status: true, scheduledFor: true },
     }),
+    recentAutopilotEvents(8),
   ]);
 
   const counts = Object.fromEntries(byStatus.map((row) => [row.status, row._count._all])) as Partial<Record<ProjectStatus, number>>;
@@ -54,10 +56,15 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
       updatedAt: p.updatedAt,
       scheduledFor: p.scheduledFor,
       lastError: p.lastError,
+      autopilot: p.autopilot,
       scenesReady: p.scenes.filter(sceneHasAssets).length,
       sceneCount: p.scenes.length,
     })),
     schedule: buildSchedule(channels, scheduled, now, scheduleDays),
+    autopilot: {
+      channelsOn: channels.filter((c) => c.autopilot && c.isActive).length,
+      events,
+    },
   };
 }
 

@@ -1,8 +1,9 @@
-import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import type { VideoFormat } from "@/generated/prisma/enums";
-import { optionalEnv, requireEnv } from "@/lib/env";
-import { PipelineError, errorMessage } from "@/lib/errors";
+import { PipelineError } from "@/lib/errors";
+import { generateGeminiJson, parseJsonText, sanitizeSchema, type GeminiClient } from "./gemini";
+
+export type { GeminiClient } from "./gemini";
 
 // ─────────────────────────────────────────────────────────────
 // Output contract
@@ -76,8 +77,6 @@ export interface GeneratedScript {
   scenes: PlannedScene[];
   stored: StoredScript;
 }
-
-export type GeminiClient = { models: Pick<GoogleGenAI["models"], "generateContent"> };
 
 // ─────────────────────────────────────────────────────────────
 // Timing helpers
@@ -186,21 +185,6 @@ export function buildUserPrompt(req: ScriptRequest): string {
     .join("\n");
 }
 
-/** Gemini's structured output accepts a JSON-Schema subset; drop keywords it may reject. */
-const UNSUPPORTED_SCHEMA_KEYS = new Set(["$schema", "minLength", "maxLength", "pattern"]);
-
-function sanitizeSchema(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(sanitizeSchema);
-  if (node && typeof node === "object") {
-    return Object.fromEntries(
-      Object.entries(node)
-        .filter(([key]) => !UNSUPPORTED_SCHEMA_KEYS.has(key))
-        .map(([key, value]) => [key, sanitizeSchema(value)]),
-    );
-  }
-  return node;
-}
-
 export const GEMINI_RESPONSE_SCHEMA = sanitizeSchema(z.toJSONSchema(ScriptSchema));
 
 // ─────────────────────────────────────────────────────────────
@@ -208,18 +192,7 @@ export const GEMINI_RESPONSE_SCHEMA = sanitizeSchema(z.toJSONSchema(ScriptSchema
 // ─────────────────────────────────────────────────────────────
 
 export function parseScriptResponse(text: string | undefined): VideoScript {
-  if (!text?.trim()) throw new Error("Gemini returned an empty response");
-  const json = text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
-  let data: unknown;
-  try {
-    data = JSON.parse(json);
-  } catch {
-    throw new Error(`Gemini returned invalid JSON: ${json.slice(0, 120)}...`);
-  }
-  const parsed = ScriptSchema.safeParse(data);
+  const parsed = ScriptSchema.safeParse(parseJsonText(text));
   if (!parsed.success) {
     throw new Error(`Gemini JSON did not match the script schema: ${z.prettifyError(parsed.error)}`);
   }
@@ -251,82 +224,38 @@ function normalizeMetadata(script: VideoScript): VideoScript {
 // Generation
 // ─────────────────────────────────────────────────────────────
 
-function httpStatusOf(error: unknown): number | undefined {
-  const status = (error as { status?: unknown })?.status;
-  return typeof status === "number" ? status : undefined;
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Generate a structured script with Gemini on the free tier.
- * Tries GEMINI_MODEL twice, then GEMINI_FALLBACK_MODEL, because free-tier quotas are per model
- * and a lighter model often still has headroom when the main one returns 429.
- */
+/** Generate a structured script with Gemini on the free tier (see gemini.ts for retries/fallback). */
 export async function generateScript(
   req: ScriptRequest,
   options: { client?: GeminiClient; models?: string[]; retryDelayMs?: number } = {},
 ): Promise<GeneratedScript> {
   if (!req.topic.trim()) throw new PipelineError("CONFLICT", "The project has no topic to write about.");
 
-  const client = options.client ?? new GoogleGenAI({ apiKey: requireEnv("GEMINI_API_KEY") });
-  const models = [
-    ...new Set(
-      options.models ?? [
-        optionalEnv("GEMINI_MODEL", "gemini-3.7-flash"),
-        optionalEnv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite"),
-      ],
-    ),
-  ];
-  const retryDelayMs = options.retryDelayMs ?? 1500;
-  const failures: string[] = [];
-
-  for (const model of models) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const response = await client.models.generateContent({
-          model,
-          contents: buildUserPrompt(req),
-          config: {
-            systemInstruction: buildSystemInstruction(req),
-            responseMimeType: "application/json",
-            responseJsonSchema: GEMINI_RESPONSE_SCHEMA,
-          },
-        });
-        const script = parseScriptResponse(response.text);
-        const scenes = planScenes(script);
-        return {
-          model,
-          script,
-          scenes,
-          stored: {
-            version: 1,
-            model,
-            generatedAt: new Date().toISOString(),
-            ...script,
-            timestamps: scenes.map(({ sceneIndex, kind, heading, startSeconds, endSeconds }) => ({
-              sceneIndex,
-              kind,
-              heading,
-              startSeconds,
-              endSeconds,
-            })),
-          },
-        };
-      } catch (error) {
-        const status = httpStatusOf(error);
-        failures.push(`${model} (attempt ${attempt}): ${errorMessage(error)}`);
-        if (status === 400 || status === 401 || status === 403) {
-          // Bad key, disabled API or malformed request: retrying or switching models won't help.
-          throw new PipelineError("PROVIDER", `Gemini rejected the request (${status}): ${errorMessage(error)}`, {
-            cause: error,
-          });
-        }
-        if (status === 429 || status === 404) break; // quota exhausted or model retired: next model
-        if (attempt < 2) await sleep(retryDelayMs * attempt);
-      }
-    }
-  }
-
-  throw new PipelineError("PROVIDER", `Script generation failed on every Gemini model:\n${failures.join("\n")}`);
+  const { model, value: script } = await generateGeminiJson({
+    task: "Script generation",
+    systemInstruction: buildSystemInstruction(req),
+    prompt: buildUserPrompt(req),
+    responseJsonSchema: GEMINI_RESPONSE_SCHEMA,
+    parse: parseScriptResponse,
+    ...options,
+  });
+  const scenes = planScenes(script);
+  return {
+    model,
+    script,
+    scenes,
+    stored: {
+      version: 1,
+      model,
+      generatedAt: new Date().toISOString(),
+      ...script,
+      timestamps: scenes.map(({ sceneIndex, kind, heading, startSeconds, endSeconds }) => ({
+        sceneIndex,
+        kind,
+        heading,
+        startSeconds,
+        endSeconds,
+      })),
+    },
+  };
 }

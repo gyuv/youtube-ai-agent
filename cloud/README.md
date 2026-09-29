@@ -35,8 +35,9 @@ cloud/
 └── .env.example           every variable the app reads
 ```
 
-The cloud renderer workflow lives at the repository root in `.github/workflows/render-video.yml`,
-because GitHub only reads workflows from there.
+The workflows live at the repository root, because GitHub only reads them from there:
+`.github/workflows/render-video.yml` (cloud renderer), `autopilot.yml` (scheduler) and
+`cloud-ci.yml` (checks and smoke renders).
 
 ## Services
 
@@ -49,6 +50,7 @@ because GitHub only reads workflows from there.
 | `pipeline.ts` | DB orchestration: whole-script generation, per-scene audio/visual regeneration, bulk asset fill, and an atomic claim before dispatching a render. |
 | `renderJob.ts` | Server side of the render webhook: claims the job, issues the signed upload URL, records RENDERED/PUBLISHED/FAILED. |
 | `youtube.ts` | Refreshes the channel's access token and builds upload metadata (chapters, `#Shorts`, scheduling). |
+| `autopilot.ts` | The autopilot's single-step tick (see below); `topicPlanner.ts` asks Gemini for fresh topics. |
 
 Status rules enforced by `pipeline.ts`:
 
@@ -115,6 +117,34 @@ that touches `cloud/`.
 DRAFT -> SCRIPTED -> ASSETS_READY -> QUEUED_FOR_RENDER -> RENDERING -> RENDERED -> PUBLISHED
                                          any stage can move to FAILED (see VideoProject.lastError)
 ```
+
+## Autopilot
+
+Turn it on per channel (Channels → Autopilot). Every 3 hours `.github/workflows/autopilot.yml`
+calls `POST /api/autopilot/tick` in a loop; each call does one small step, well inside Vercel's
+time limit, and says whether more work remains:
+
+1. **Housekeeping**: renders that stopped reporting for 3 hours become *Failed* (any project).
+2. **Dispatch** an autopilot video whose scenes are all ready, or retry a failed render.
+3. **Fill** one missing voice or visual.
+4. **Script** a planned video with Gemini.
+5. **Plan** a video for the soonest open slot inside the channel's lead window (default 36 h),
+   taking the next line of the channel's *topic backlog*, or a fresh Gemini idea that doesn't
+   repeat the channel's last 40 topics.
+
+Guard rails:
+
+- It only touches projects it created (marked **Auto**); your own videos are never changed.
+- Each video gets 3 attempts; after that it's parked as *Failed* with the reason, and planning on
+  that channel pauses for 12 hours so a systemic problem (bad key, quota) doesn't pile up failures.
+- *Review mode* stops at "Assets ready" so you approve each video with Dispatch Cloud Render.
+- With auto-publish on, the renderer uploads the video as private with `publishAt` = the slot.
+- Every step is logged in the dashboard's Autopilot panel (kept 30 days); **Run now** starts a
+  run immediately.
+
+The workflow needs no checkout or install (a run costs seconds of runner time) and reuses the
+`APP_URL` and `RENDER_WEBHOOK_SECRET` repository secrets. GitHub runs schedules from the default
+branch only and pauses them after 60 days without repository activity.
 
 ## Studio
 

@@ -84,6 +84,13 @@ model Channel {
   autoPublish     Boolean @default(false) // renderer uploads to YouTube directly when true
   isActive        Boolean @default(true)
 
+  // Autopilot: fill upcoming posting slots without an operator.
+  autopilot             Boolean      @default(false)
+  autopilotReview       Boolean      @default(false) // stop at ASSETS_READY until an operator dispatches
+  autopilotLeadHours    Int          @default(36) // how far ahead of a slot production starts
+  autopilotVisualSource VisualSource @default(POLLINATIONS)
+  topicBacklog          String?      @db.Text // one topic per line, used before Gemini ideas
+
   projects VideoProject[]
 
   createdAt DateTime @default(now())
@@ -127,6 +134,10 @@ model VideoProject {
   youtubeVideoId String?   @unique
   publishedAt    DateTime?
 
+  // Created and advanced by the autopilot; it never touches operator-made projects.
+  autopilot         Boolean @default(false)
+  autopilotFailures Int     @default(0) // autopilot gives up on the project after 3
+
   scenes Scene[]
 
   createdAt DateTime @default(now())
@@ -134,6 +145,7 @@ model VideoProject {
 
   @@index([channelId, status])
   @@index([status, scheduledFor])
+  @@index([autopilot, status])
 }
 
 /// A single narrated beat of a video: one voice clip over one visual.
@@ -164,4 +176,17 @@ model Scene {
   updatedAt DateTime @updatedAt
 
   @@unique([projectId, sceneIndex])
+}
+
+/// One autopilot step, shown as the activity feed on the dashboard. Pruned after 30 days.
+model AutopilotEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  action    String // planned | scripted | filled | dispatched | swept | error | idle
+  level     String   @default("info") // info | error
+  message   String   @db.Text
+  channelId String?
+  projectId String?
+
+  @@index([createdAt])
 }

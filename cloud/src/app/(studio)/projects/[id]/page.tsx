@@ -1,4 +1,4 @@
-import { ChevronLeft, CircleAlert, ExternalLink, Github, Radio, Youtube } from "lucide-react";
+import { Bot, ChevronLeft, CircleAlert, ExternalLink, Github, Radio, Youtube } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -100,6 +100,11 @@ export default async function StudioPage({ params, searchParams }: Params) {
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <StatusBadge status={project.status} />
+            {project.autopilot ? (
+              <span className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium" title="Created and advanced by the autopilot">
+                <Bot className="size-3" /> Autopilot
+              </span>
+            ) : null}
             <span className="text-sm text-muted-foreground">
               <Link href={`/channels/${project.channelId}`} className="hover:text-foreground hover:underline">
                 {project.channel.name}
@@ -144,6 +149,15 @@ export default async function StudioPage({ params, searchParams }: Params) {
                 </a>
               </>
             ) : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {project.autopilot && project.channel.autopilotReview && project.status === ProjectStatus.ASSETS_READY ? (
+        <Alert className="mb-6">
+          <Bot />
+          <AlertTitle>Ready for your review</AlertTitle>
+          <AlertDescription>
+            The autopilot prepared every scene and is waiting for you. Watch the preview, repair anything, then Dispatch Cloud Render.
           </AlertDescription>
         </Alert>
       ) : null}
