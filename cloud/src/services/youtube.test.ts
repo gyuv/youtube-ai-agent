@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/prisma", () => ({ prisma: {} }));
+const db = vi.hoisted(() => ({ channel: { update: vi.fn() } }));
+vi.mock("@/lib/prisma", () => ({ prisma: db }));
+vi.mock("@/lib/crypto", () => ({ decryptSecret: (value: string) => value.replace(/^enc:/, ""), encryptSecret: (value: string) => `enc:${value}` }));
 
-import { buildYouTubeMetadata, refreshAccessToken } from "./youtube";
+import { CLEARED_GRANT, buildYouTubeMetadata, getChannelAccessToken, refreshAccessToken, revokeGoogleGrant } from "./youtube";
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -86,5 +88,34 @@ describe("refreshAccessToken", () => {
     expect(accessToken).toBe("ya29.new");
     expect(expiresAt.getTime()).toBeGreaterThan(Date.now() + 3500_000);
     expect(String(fetchMock.mock.calls[0][1]?.body)).toContain("grant_type=refresh_token");
+  });
+});
+
+describe("getChannelAccessToken", () => {
+  it("deletes the stored grant once Google reports it revoked", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "id");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "secret");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 })));
+    db.channel.update.mockReset();
+    await expect(getChannelAccessToken({ id: "c1", name: "Money Minute", oauthRefreshTokenEnc: "enc:1//r" })).rejects.toThrow(/tokens were deleted/);
+    expect(db.channel.update).toHaveBeenCalledWith({ where: { id: "c1" }, data: CLEARED_GRANT });
+  });
+});
+
+describe("revokeGoogleGrant", () => {
+  it("posts the token to Google's revoke endpoint", async () => {
+    const fetchMock = vi.fn<FetchFn>(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(revokeGoogleGrant("1//r")).resolves.toBe(true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://oauth2.googleapis.com/revoke");
+    expect(String(init?.body)).toBe("token=1%2F%2Fr");
+  });
+
+  it("never throws: an already revoked token or a network error just reports false", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "invalid_token" }), { status: 400 })));
+    await expect(revokeGoogleGrant("x")).resolves.toBe(false);
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
+    await expect(revokeGoogleGrant("x")).resolves.toBe(false);
   });
 });

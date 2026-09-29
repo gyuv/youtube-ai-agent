@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { prisma } from "@/lib/prisma";
+import { GOOGLE_PERMISSIONS_URL } from "@/lib/publicInfo";
 import { disconnectChannelAction } from "../actions";
 import { ChannelForm } from "../channel-form";
 
@@ -55,7 +56,12 @@ export default async function ChannelPage({
               <Youtube className="size-4 text-red-500" /> YouTube
             </CardTitle>
             <CardDescription className="mt-1.5">
-              Lumen asks only for upload access and your channel&apos;s name. Tokens are encrypted at rest.
+              Lumen asks only for upload access and your channel&apos;s name. Tokens are encrypted at rest. Disconnect revokes the access at
+              Google and deletes the tokens; you can also revoke it in your{" "}
+              <a href={GOOGLE_PERMISSIONS_URL} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                Google security settings
+              </a>
+              .
             </CardDescription>
           </div>
         </CardHeader>

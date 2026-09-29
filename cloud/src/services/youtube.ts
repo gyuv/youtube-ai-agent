@@ -16,6 +16,18 @@ export const YOUTUBE_SCOPES = [
 ];
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
+
+/** Google no longer honours the channel's grant: revoked by the user, or expired. */
+export class GrantRevokedError extends PipelineError {
+  constructor() {
+    super(
+      "PROVIDER",
+      "Google revoked or expired this channel's authorisation, so the stored tokens were deleted; reconnect the channel. " +
+        "(OAuth apps left in Testing mode expire refresh tokens after 7 days; publish the consent screen.)",
+    );
+  }
+}
 
 export async function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; expiresAt: Date }> {
   let res: Response;
@@ -37,16 +49,38 @@ export async function refreshAccessToken(refreshToken: string): Promise<{ access
   }
   const body = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error?: string };
   if (!res.ok || !body.access_token) {
-    if (body.error === "invalid_grant") {
-      throw new PipelineError(
-        "PROVIDER",
-        "Google revoked or expired this channel's authorisation; reconnect the channel. " +
-          "(OAuth apps left in Testing mode expire refresh tokens after 7 days; publish the consent screen.)",
-      );
-    }
+    if (body.error === "invalid_grant") throw new GrantRevokedError();
     throw new PipelineError("PROVIDER", `Google token refresh failed (${res.status}): ${body.error ?? "unknown error"}`);
   }
   return { accessToken: body.access_token, expiresAt: new Date(Date.now() + (body.expires_in ?? 3600) * 1000) };
+}
+
+/** Channel fields that hold a YouTube grant, emptied on disconnect or revocation. */
+export const CLEARED_GRANT = {
+  youtubeChannelId: null,
+  oauthAccessTokenEnc: null,
+  oauthRefreshTokenEnc: null,
+  oauthTokenExpiresAt: null,
+  oauthScopes: [],
+  autoPublish: false,
+};
+
+/**
+ * Revoke the grant at Google so the tokens stop working everywhere. Best effort: a token that is
+ * already revoked or expired answers 400, which is fine.
+ */
+export async function revokeGoogleGrant(token: string): Promise<boolean> {
+  try {
+    const res = await fetch(REVOKE_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** A fresh access token for publishing; the refresh token never leaves the app. */
@@ -54,7 +88,15 @@ export async function getChannelAccessToken(channel: Pick<Channel, "id" | "name"
   if (!channel.oauthRefreshTokenEnc) {
     throw new PipelineError("CONFLICT", `Channel "${channel.name}" is not connected to YouTube.`);
   }
-  const { accessToken, expiresAt } = await refreshAccessToken(decryptSecret(channel.oauthRefreshTokenEnc));
+  let refreshed: { accessToken: string; expiresAt: Date };
+  try {
+    refreshed = await refreshAccessToken(decryptSecret(channel.oauthRefreshTokenEnc));
+  } catch (error) {
+    // YouTube's developer policies require deleting authorized data once consent is revoked.
+    if (error instanceof GrantRevokedError) await prisma.channel.update({ where: { id: channel.id }, data: CLEARED_GRANT });
+    throw error;
+  }
+  const { accessToken, expiresAt } = refreshed;
   await prisma.channel.update({
     where: { id: channel.id },
     data: { oauthAccessTokenEnc: encryptSecret(accessToken), oauthTokenExpiresAt: expiresAt },

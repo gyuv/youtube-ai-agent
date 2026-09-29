@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Clapperboard } from "lucide-react";
+import { PolicyFooter } from "@/components/policy-footer";
 import { authConfigError, safeNextPath } from "@/lib/session";
 import { LoginForm } from "./login-form";
 
@@ -21,6 +22,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
         </div>
         <LoginForm next={safeNextPath(next)} configError={authConfigError()} />
+        <PolicyFooter className="mt-10" />
       </div>
     </main>
   );

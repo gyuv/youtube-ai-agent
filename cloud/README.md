@@ -167,7 +167,7 @@ branch only and pauses them after 60 days without repository activity.
 | **New video** `/projects/new` | Topic, channel, format, and "next free slot" / custom time. Optionally writes the script with Gemini immediately. |
 | **Scene Repair Studio** `/projects/[id]` | Live preview of the exact render composition (Remotion Player), a proportional timeline, and a card per scene: edit narration, regenerate its audio, regenerate its AI image or swap in stock B-roll, lock it. Toolbar: write/rewrite script, generate missing assets scene by scene with progress, **Dispatch Cloud Render**. The page follows the render live. |
 
-Everything except `/login` and the runner's webhook requires the studio password. The session is
+Everything except `/login`, `/privacy`, `/terms` and the runner's webhooks requires the studio password. The session is
 an HMAC-signed cookie; server actions and API routes re-check it on every call.
 
 ## Connecting YouTube
@@ -182,6 +182,14 @@ an HMAC-signed cookie; server actions and API routes re-check it on every call.
    `https://<your-app>/api/oauth/google/callback` (and `http://localhost:3000/api/oauth/google/callback` for local dev).
 4. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` and
    `TOKEN_ENCRYPTION_KEY`, then use **Connect YouTube** on the channel page.
+5. Until the Google Cloud project passes the YouTube API Services audit, YouTube keeps every upload
+   private. [docs/youtube-api-audit.md](docs/youtube-api-audit.md) walks through the application,
+   with answers for each part of the form. Set `PUBLIC_OPERATOR_NAME` and `PUBLIC_CONTACT_EMAIL`
+   first: they appear on the public `/privacy` and `/terms` pages the audit asks for.
+
+**Disconnect** revokes the grant at Google and deletes the stored tokens. If Google reports a grant
+as revoked (for example from the user's Google security settings), the app deletes the stored
+tokens the next time it tries to use them.
 
 ## Database
 

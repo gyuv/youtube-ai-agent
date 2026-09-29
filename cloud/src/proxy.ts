@@ -19,5 +19,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!login|api/render/webhook|api/autopilot/tick|_next/static|_next/image|favicon.ico|fonts/).*)"],
+  matcher: ["/((?!login|privacy|terms|api/render/webhook|api/autopilot/tick|_next/static|_next/image|favicon.ico|fonts/).*)"],
 };
