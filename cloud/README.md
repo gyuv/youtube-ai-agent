@@ -3,6 +3,11 @@
 A fully cloud-hosted YouTube automation studio built only on free services. Your own machine
 does no rendering and runs no scripts; it only needs a browser.
 
+> **Setting it up?** Follow **[docs/GUIDE.md](docs/GUIDE.md)**, the complete step-by-step guide:
+> deploy, connect YouTube, make your first video, turn on the autopilot, and troubleshoot. To lift
+> YouTube's private-upload lock, see **[docs/youtube-api-audit.md](docs/youtube-api-audit.md)**.
+> This README is the technical reference.
+
 | Layer | Service (free tier) |
 | --- | --- |
 | Studio UI and API routes | Next.js App Router on Vercel |
@@ -139,7 +144,8 @@ time limit, and says whether more work remains:
 2. **Dispatch** an autopilot video whose scenes are all ready, or retry a failed render.
 3. **Fill** one missing voice or visual.
 4. **Script** a planned video with Gemini.
-5. **Plan** a video for the soonest open slot inside the channel's lead window (default 36 h),
+5. **Verify** that a scheduled autopilot video really went live once its slot has passed.
+6. **Plan** a video for the soonest open slot inside the channel's lead window (default 36 h),
    taking the next line of the channel's *topic backlog*, or a fresh Gemini idea that doesn't
    repeat the channel's last 40 topics.
 
@@ -210,6 +216,13 @@ npm run dev                   # http://localhost:3000
 ## Deploying to Vercel
 
 1. Import the repository in Vercel and set **Root Directory** to `cloud`.
-2. Add the variables from `.env.example` under Project Settings → Environment Variables.
-3. Run `npm run db:deploy` once (locally with `DIRECT_URL` set) to create the tables in Supabase.
+2. Override the **Build Command** so production deploys apply database migrations first (and
+   fail fast on a wrong `DIRECT_URL`), while preview deploys leave the database alone:
+   ```
+   [ "$VERCEL_ENV" != production ] || npx prisma migrate deploy && npm run build
+   ```
+3. Add the variables from `.env.example` under Project Settings → Environment Variables, and set
+   the Function Region to your Supabase region.
 4. Add `APP_URL` and `RENDER_WEBHOOK_SECRET` as GitHub repository secrets (see *Cloud renderer*).
+
+[docs/GUIDE.md](docs/GUIDE.md) has every click, the values to collect, and troubleshooting tables.
