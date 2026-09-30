@@ -109,6 +109,8 @@ async function onRendered(e: Extract<RenderEvent, { event: "rendered" }>): Promi
   if (!project.channel.autoPublish || project.youtubeVideoId) return { videoUrl, publish: null };
   try {
     const accessToken = await getChannelAccessToken(project.channel);
+    // The runner uploads next; hold the lease so the studio's Publish button can't upload it too.
+    await prisma.videoProject.update({ where: { id: e.projectId }, data: { publishStartedAt: new Date() } });
     return { videoUrl, publish: { accessToken, metadata: buildYouTubeMetadata(project, project.scenes, project.channel) } };
   } catch (error) {
     // The render itself succeeded; keep it and explain why publishing didn't happen.
@@ -135,6 +137,7 @@ async function onPublished(e: Extract<RenderEvent, { event: "published" }>): Pro
       youtubeVideoId: e.youtubeVideoId,
       publishedAt: now,
       lastError: null,
+      publishStartedAt: null,
       // Uploads from an unaudited Google Cloud project come back private whatever was asked for.
       youtubeLocked: e.visibility ? isLockedPrivate(wantedVisibility(project.privacy), e.visibility, now) : false,
       youtubeCheckedAt: e.visibility ? now : null,
@@ -161,7 +164,7 @@ async function onFailed(e: Extract<RenderEvent, { event: "failed" }>): Promise<A
       : await prisma.videoProject.updateMany({
           // Publishing failed after a good render: keep RENDERED so the video isn't lost.
           where: { id: e.projectId, status: ProjectStatus.RENDERED, renderRunId: e.runId },
-          data: { lastError: clip(`Auto-publish failed: ${e.error}`) },
+          data: { lastError: clip(`Auto-publish failed: ${e.error}`), publishStartedAt: null },
         });
   // A second report of the same failure (worker + workflow fallback) is expected and harmless.
   return done.count === 0 ? { ok: true, ignored: true } : { ok: true };

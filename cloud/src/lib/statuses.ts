@@ -14,6 +14,14 @@ export const EDITABLE_STATUSES: readonly ProjectStatus[] = [
 /** A (re-)render may be dispatched. */
 export const RENDERABLE_STATUSES: readonly ProjectStatus[] = [ProjectStatus.ASSETS_READY, ProjectStatus.RENDERED, ProjectStatus.FAILED];
 
+/** How long a YouTube upload may hold a project before another attempt can take over. */
+export const PUBLISH_LEASE_MS = 20 * 60_000;
+
+/** Prisma filter: no YouTube upload is in progress (or the last one's lease has expired). */
+export function publishLeaseFree(now: Date) {
+  return { OR: [{ publishStartedAt: null }, { publishStartedAt: { lt: new Date(now.getTime() - PUBLISH_LEASE_MS) } }] };
+}
+
 /** A GitHub runner owns the project. */
 export const IN_FLIGHT_STATUSES: readonly ProjectStatus[] = [ProjectStatus.QUEUED_FOR_RENDER, ProjectStatus.RENDERING];
 

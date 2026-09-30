@@ -195,7 +195,7 @@ export async function runRender(config: WorkerConfig): Promise<RenderOutcome> {
     if (process.env.GITHUB_ACTIONS === "true") console.log(`::add-mask::${rendered.publish.accessToken}`);
     log(`Uploading to YouTube (${rendered.publish.metadata.status.privacyStatus})`);
     const { metadata, accessToken } = rendered.publish;
-    const upload = await uploadVideoToYouTube({ filePath: output, metadata, accessToken });
+    const upload = await uploadVideoToYouTube({ file: output, metadata, accessToken });
     const videoId = upload.videoId;
     const visibility = await readBackVisibility(videoId, accessToken, upload.visibility);
     await client.published({ youtubeVideoId: videoId, ...(visibility ? { visibility } : {}) });

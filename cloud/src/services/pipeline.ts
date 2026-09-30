@@ -3,7 +3,7 @@ import { Prisma, type Scene } from "@/generated/prisma/client";
 import { ProjectStatus, VisualSource } from "@/generated/prisma/enums";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
-import { EDITABLE_STATUSES, RENDERABLE_STATUSES } from "@/lib/statuses";
+import { EDITABLE_STATUSES, RENDERABLE_STATUSES, publishLeaseFree } from "@/lib/statuses";
 import { uploadObject } from "@/lib/storage";
 import { dispatchRenderWorkflow } from "./renderDispatcher";
 import { estimateSpeechSeconds, generateScript } from "./scriptGenerator";
@@ -351,9 +351,10 @@ export async function dispatchCloudRender(projectId: string) {
     throw new PipelineError("CONFLICT", `Scenes ${incomplete.join(", ") || "(none)"} still need audio or a visual.`);
   }
 
-  // Atomic claim: two clicks on "Dispatch Cloud Render" can't start two runners.
+  // Atomic claim: two clicks on "Dispatch Cloud Render" can't start two runners, and a video
+  // that is being uploaded to YouTube isn't re-rendered underneath the upload.
   const claimed = await prisma.videoProject.updateMany({
-    where: { id: projectId, status: { in: RENDERABLE } },
+    where: { id: projectId, status: { in: RENDERABLE }, ...publishLeaseFree(new Date()) },
     data: {
       status: ProjectStatus.QUEUED_FOR_RENDER,
       lastError: null,
@@ -362,7 +363,9 @@ export async function dispatchCloudRender(projectId: string) {
       renderFinishedAt: null,
     },
   });
-  if (claimed.count === 0) throw new PipelineError("CONFLICT", "This project is already queued for rendering.");
+  if (claimed.count === 0) {
+    throw new PipelineError("CONFLICT", "This project is already queued for rendering, or is being uploaded to YouTube.");
+  }
 
   try {
     return await dispatchRenderWorkflow(projectId);

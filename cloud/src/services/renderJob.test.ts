@@ -112,6 +112,8 @@ describe("rendered", () => {
     youtube.getChannelAccessToken.mockResolvedValue("ya29.fresh");
     const result = await handleRenderEvent(rendered);
     expect(result).toEqual({ videoUrl: url, publish: { accessToken: "ya29.fresh", metadata: { snippet: {}, status: {} } } });
+    // The runner's upload holds the lease so the studio's Publish button can't upload it as well.
+    expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: PROJECT_ID }, data: { publishStartedAt: expect.any(Date) } });
   });
 
   it("keeps the render but explains when publishing can't start", async () => {
@@ -146,6 +148,7 @@ describe("published and failed", () => {
       youtubeVideoId: "dQw4w9WgXcQ",
       youtubeLocked: false,
       youtubeCheckedAt: null, // the runner couldn't read the visibility back
+      publishStartedAt: null,
     });
 
     db.videoProject.updateMany.mockResolvedValue({ count: 0 });
@@ -179,7 +182,7 @@ describe("published and failed", () => {
     await handleRenderEvent({ event: "failed", ...ids, stage: "publish", error: "quotaExceeded" });
     const publishFailure = db.videoProject.updateMany.mock.calls[1][0];
     expect(publishFailure.where).toMatchObject({ status: "RENDERED" });
-    expect(publishFailure.data).toEqual({ lastError: "Auto-publish failed: quotaExceeded" });
+    expect(publishFailure.data).toEqual({ lastError: "Auto-publish failed: quotaExceeded", publishStartedAt: null });
   });
 
   it("ignores a second failure report for the same run", async () => {

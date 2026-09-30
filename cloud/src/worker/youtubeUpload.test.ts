@@ -46,7 +46,7 @@ describe("nextOffsetFromRange", () => {
 describe("uploadVideoToYouTube", () => {
   it("returns the visibility YouTube applied", async () => {
     stubFetch(started(), done("dQw4w9WgXcQ", { privacyStatus: "private", uploadStatus: "uploaded" }));
-    await expect(uploadVideoToYouTube({ filePath, metadata: METADATA, accessToken: "t" })).resolves.toEqual({
+    await expect(uploadVideoToYouTube({ file: filePath, metadata: METADATA, accessToken: "t" })).resolves.toEqual({
       videoId: "dQw4w9WgXcQ",
       visibility: { privacyStatus: "private", publishAt: null },
     });
@@ -54,7 +54,7 @@ describe("uploadVideoToYouTube", () => {
 
   it("opens a resumable session with the metadata and uploads the file", async () => {
     const fetchMock = stubFetch(started(), done());
-    await expect(uploadVideoToYouTube({ filePath, metadata: METADATA, accessToken: "ya29.x" })).resolves.toEqual({ videoId: "dQw4w9WgXcQ", visibility: null });
+    await expect(uploadVideoToYouTube({ file: filePath, metadata: METADATA, accessToken: "ya29.x" })).resolves.toEqual({ videoId: "dQw4w9WgXcQ", visibility: null });
 
     const [initUrl, init] = fetchMock.mock.calls[0];
     expect(initUrl).toContain("uploadType=resumable&part=snippet,status");
@@ -69,7 +69,7 @@ describe("uploadVideoToYouTube", () => {
 
   it("sends only the remainder after a partial write", async () => {
     const fetchMock = stubFetch(started(), partial(3), done());
-    await uploadVideoToYouTube({ filePath, metadata: METADATA, accessToken: "t" });
+    await uploadVideoToYouTube({ file: filePath, metadata: METADATA, accessToken: "t" });
     const resume = fetchMock.mock.calls[2][1];
     expect(resume?.headers).toMatchObject({ "Content-Range": "bytes 4-9/10" });
     expect(bodyText(resume)).toBe("456789");
@@ -77,7 +77,7 @@ describe("uploadVideoToYouTube", () => {
 
   it("asks YouTube how much it has after a network error, then resumes", async () => {
     const fetchMock = stubFetch(started(), new Error("socket hang up"), partial(6), done());
-    await uploadVideoToYouTube({ filePath, metadata: METADATA, accessToken: "t", retryDelayMs: 0 });
+    await uploadVideoToYouTube({ file: filePath, metadata: METADATA, accessToken: "t", retryDelayMs: 0 });
     expect(fetchMock.mock.calls[2][1]?.headers).toMatchObject({ "Content-Range": "bytes */10" });
     expect(bodyText(fetchMock.mock.calls[3][1])).toBe("789");
   });
@@ -85,6 +85,6 @@ describe("uploadVideoToYouTube", () => {
   it("surfaces quota errors with YouTube's reason", async () => {
     const quota = new Response(JSON.stringify({ error: { message: "quota", errors: [{ reason: "quotaExceeded" }] } }), { status: 403 });
     stubFetch(quota);
-    await expect(uploadVideoToYouTube({ filePath, metadata: METADATA, accessToken: "t" })).rejects.toThrow(/403 quotaExceeded/);
+    await expect(uploadVideoToYouTube({ file: filePath, metadata: METADATA, accessToken: "t" })).rejects.toThrow(/403 quotaExceeded/);
   });
 });

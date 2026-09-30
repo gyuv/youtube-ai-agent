@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProjectStatus } from "@/generated/prisma/enums";
-import { EDITABLE_STATUSES, IN_FLIGHT_STATUSES, RENDERABLE_STATUSES } from "@/lib/statuses";
+import { EDITABLE_STATUSES, IN_FLIGHT_STATUSES, PUBLISH_LEASE_MS, RENDERABLE_STATUSES } from "@/lib/statuses";
 import { sceneHasAssets } from "@/services/pipeline";
 import { getStudioProject } from "@/services/projects";
 import { actionsRunUrl } from "@/services/renderDispatcher";
@@ -16,6 +16,7 @@ import { formatSlot } from "@/services/schedule";
 import { AUDIT_FORM_URL } from "@/services/youtubeVisibility";
 import { AutoRefresh } from "./_components/auto-refresh";
 import { MetadataForm } from "./_components/metadata-form";
+import { PublishButton } from "./_components/publish-button";
 import { PreviewPlayer } from "./_components/preview-player";
 import { SceneCard } from "./_components/scene-card";
 import { StudioToolbar } from "./_components/studio-toolbar";
@@ -93,9 +94,16 @@ export default async function StudioPage({ params, searchParams }: Params) {
   }
   const totalSeconds = scenes.reduce((sum, s) => sum + s.durationSeconds, 0);
 
+  const now = new Date();
+  const uploading = !!project.publishStartedAt && now.getTime() - project.publishStartedAt.getTime() < PUBLISH_LEASE_MS;
+  const readyToPublish = project.status === ProjectStatus.RENDERED && !!project.renderedVideoUrl && !project.youtubeVideoId;
+  const privacyLabel = project.privacy === "PUBLIC" ? "Public" : project.privacy === "UNLISTED" ? "Unlisted" : "Private";
+  const scheduledPublic =
+    project.privacy === "PUBLIC" && project.scheduledFor && project.scheduledFor.getTime() > now.getTime() + 5 * 60_000 ? project.scheduledFor : null;
+
   return (
     <>
-      <AutoRefresh active={inFlight} />
+      <AutoRefresh active={inFlight || (readyToPublish && uploading)} />
       <Link href="/" className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ChevronLeft className="size-4" /> Dashboard
       </Link>
@@ -187,6 +195,38 @@ export default async function StudioPage({ params, searchParams }: Params) {
               <VisibilityCheck projectId={project.id} variant="secondary" />
               {project.youtubeCheckedAt ? <span className="text-xs">Checked {timeAgo(project.youtubeCheckedAt)}</span> : null}
             </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {readyToPublish ? (
+        <Alert className="mb-6">
+          <Youtube className="text-red-500" />
+          <AlertTitle>{uploading ? "Uploading to YouTube…" : "Rendered, not on YouTube yet"}</AlertTitle>
+          <AlertDescription className="grid gap-3">
+            {uploading ? (
+              <p>This page refreshes on its own when the upload finishes.</p>
+            ) : (
+              <>
+                <p>
+                  Saving the details doesn&apos;t upload the video. Publishing uploads it{" "}
+                  {scheduledPublic ? (
+                    <>now, and YouTube makes it public on {formatSlot(scheduledPublic, project.channel.postingTimezone)}.</>
+                  ) : (
+                    <>now as {privacyLabel}. Change the visibility under YouTube details first if needed.</>
+                  )}
+                </p>
+                {project.channel.oauthRefreshTokenEnc ? (
+                  <PublishButton projectId={project.id} />
+                ) : (
+                  <p>
+                    <Link href={`/channels/${project.channelId}`} className="text-foreground underline underline-offset-4">
+                      Connect {project.channel.name} to YouTube
+                    </Link>{" "}
+                    first, then come back here to publish.
+                  </p>
+                )}
+              </>
+            )}
           </AlertDescription>
         </Alert>
       ) : null}

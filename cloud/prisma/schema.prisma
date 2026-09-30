@@ -137,6 +137,9 @@ model VideoProject {
   // Google Cloud projects get every API upload locked private until the YouTube API audit passes.
   youtubeLocked    Boolean   @default(false)
   youtubeCheckedAt DateTime? // last time the video's visibility was read back from YouTube
+  // Lease held while a YouTube upload is in progress (runner auto-publish or the studio's Publish
+  // button), so the same video is never uploaded twice. Expires on its own after a crash.
+  publishStartedAt DateTime?
 
   // Created and advanced by the autopilot; it never touches operator-made projects.
   autopilot         Boolean @default(false)

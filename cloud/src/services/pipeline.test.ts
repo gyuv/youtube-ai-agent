@@ -56,7 +56,8 @@ describe("dispatchCloudRender", () => {
 
     await expect(dispatchCloudRender("p1")).resolves.toEqual({ workflowUrl: "https://github.com/x" });
     const claim = db.videoProject.updateMany.mock.calls[0][0];
-    expect(claim.where).toEqual({ id: "p1", status: { in: ["ASSETS_READY", "RENDERED", "FAILED"] } });
+    expect(claim.where).toMatchObject({ id: "p1", status: { in: ["ASSETS_READY", "RENDERED", "FAILED"] } });
+    expect(claim.where.OR).toEqual([{ publishStartedAt: null }, { publishStartedAt: { lt: expect.any(Date) } }]); // not while uploading
     expect(claim.data).toMatchObject({ status: "QUEUED_FOR_RENDER", lastError: null, renderRunId: null });
     expect(dispatchRenderWorkflow).toHaveBeenCalledWith("p1");
   });

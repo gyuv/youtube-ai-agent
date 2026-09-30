@@ -342,6 +342,10 @@ Click **Create channel**. Then, on the channel's page:
    GitHub** shows the log. A Short takes about 3–5 minutes.
 7. When it finishes, the **Output** card offers **Rendered MP4** (download) and, with auto-publish
    on, **Watch on YouTube**.
+8. If auto-publish was off, or YouTube wasn't connected yet, the video stays **Rendered** and the
+   page shows *Rendered, not on YouTube yet*. Check the visibility under **YouTube details**, click
+   **Save details**, then click **Publish to YouTube**. It uploads the finished video without
+   rendering it again (up to a couple of minutes). Saving the details alone never uploads anything.
 
 Always check the facts yourself before publishing. Gemini can be wrong, and tax and legal content
 must be accurate.
@@ -454,6 +458,8 @@ yourself in YouTube Studio if you want it public.
 | "Google didn't return a refresh token" | Remove Lumen Cloud at [myaccount.google.com/permissions](https://myaccount.google.com/permissions), then connect again. |
 | "Google revoked or expired this channel's authorisation" | Connect again. If it keeps happening every 7 days, the consent screen is still in *Testing*. |
 | "Auto-publish failed: … quotaExceeded" | You used today's 10,000 units. It resets at midnight Pacific time; publish the rest tomorrow. |
+| Video shows **Rendered** but isn't on YouTube | It was rendered without auto-publish. Click **Publish to YouTube** on the video's page (step 9.8). |
+| "Publishing to YouTube failed: …" on a video | The reason follows the colon: often quota, or YouTube needs reconnecting. Fix it, then click **Publish to YouTube** again. |
 | **YouTube kept this video private** | Normal until the audit passes (step 11). |
 
 **Autopilot**

@@ -109,6 +109,11 @@ which YouTube asks creators to disclose. Scheduled **public** projects (`schedul
 private with `publishAt`, and YouTube makes them public at that time. Private and unlisted projects
 upload with that visibility straight away, because a YouTube schedule always ends public.
 
+A video rendered without auto-publish (or whose auto-publish failed) stays *Rendered*; **Publish
+to YouTube** on its page uploads the stored MP4 from the app itself, without a new render. A
+`publishStartedAt` lease, held by either upload path, keeps a video from being uploaded twice and
+blocks a re-render while an upload is running.
+
 After each upload the renderer reads the video's visibility back from YouTube (1 quota unit). If a
 video that should be public or unlisted comes back private, the project is flagged **locked
 private**: the studio explains why, the dashboard counts it under *Needs attention*, and the

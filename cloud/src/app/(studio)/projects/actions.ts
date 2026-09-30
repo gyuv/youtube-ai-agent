@@ -15,6 +15,7 @@ import {
   type SceneFillResult,
 } from "@/services/pipeline";
 import { createProject, deleteProject, setSceneLocked, updateProjectMetadata } from "@/services/projects";
+import { publishRenderedProject } from "@/services/publisher";
 import { checkYouTubeVisibility } from "@/services/youtube";
 
 const Id = z.string().regex(/^[a-z0-9]{20,40}$/, "Invalid id");
@@ -78,6 +79,23 @@ export async function dispatchRenderAction(projectId: string): Promise<ActionRes
   const result = await toActionResult(async () => {
     const { workflowUrl } = await dispatchCloudRender(Id.parse(projectId));
     return { workflowUrl };
+  });
+  refresh(projectId);
+  return result;
+}
+
+export async function publishToYouTubeAction(
+  projectId: string,
+): Promise<ActionResult<{ youtubeVideoId: string; visibility: string | null; locked: boolean; scheduled: boolean }>> {
+  await requireOperator();
+  const result = await toActionResult(async () => {
+    const published = await publishRenderedProject(Id.parse(projectId));
+    return {
+      youtubeVideoId: published.youtubeVideoId,
+      visibility: published.visibility?.privacyStatus ?? null,
+      locked: published.locked,
+      scheduled: published.scheduledFor !== null,
+    };
   });
   refresh(projectId);
   return result;
