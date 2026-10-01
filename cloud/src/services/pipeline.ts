@@ -93,6 +93,7 @@ export async function generateProjectScript(projectId: string) {
     language: project.channel.language,
     targetAudience: project.channel.targetAudience,
     channelPrompt: project.channel.defaultScriptPrompt,
+    performanceNotes: project.channel.learnFromAnalytics ? project.channel.performanceNotes : null,
   });
 
   return prisma.$transaction(async (tx) => {

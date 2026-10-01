@@ -218,6 +218,13 @@ export default async function StudioPage({ params, searchParams }: Params) {
                     <Youtube className="size-4 text-red-500" /> Watch on YouTube <ExternalLink className="size-3" />
                   </a>
                 ) : null}
+                {project.viewCount !== null ? (
+                  <p className="text-muted-foreground">
+                    {project.viewCount.toLocaleString("en-IN")} views · {(project.likeCount ?? 0).toLocaleString("en-IN")} likes ·{" "}
+                    {(project.commentCount ?? 0).toLocaleString("en-IN")} comments
+                    {project.statsUpdatedAt ? ` (as of ${timeAgo(project.statsUpdatedAt)})` : ""}
+                  </p>
+                ) : null}
                 {project.renderedVideoUrl ? (
                   <a href={project.renderedVideoUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 hover:underline">
                     <ExternalLink className="size-4" /> Rendered MP4

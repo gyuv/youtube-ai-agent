@@ -17,6 +17,8 @@ export interface TopicRequest {
   language?: string;
   format: VideoFormat;
   channelPrompt?: string | null;
+  /** Gemini's lessons from the channel's YouTube stats (see analytics.ts). */
+  performanceNotes?: string | null;
   /** Newest first. The planner must not repeat or paraphrase these. */
   recentTopics: string[];
 }
@@ -29,6 +31,7 @@ export function buildTopicPrompt(req: TopicRequest): { system: string; prompt: s
     "Propose exactly one video topic: specific, genuinely useful or surprising, and answerable accurately without live data.",
     "Avoid clickbait that the video can't deliver, medical or financial advice framed as instructions, and anything about real private individuals.",
     req.channelPrompt?.trim() ? `Channel style guide:\n${req.channelPrompt.trim()}` : "",
+    req.performanceNotes?.trim() ? `Lessons from this channel's YouTube performance (apply them):\n${req.performanceNotes.trim()}` : "",
   ]
     .filter(Boolean)
     .join("\n");

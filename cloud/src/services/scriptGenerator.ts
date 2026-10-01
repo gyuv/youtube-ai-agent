@@ -69,6 +69,8 @@ export interface ScriptRequest {
   targetAudience?: string | null;
   /** Channel.defaultScriptPrompt: house style, persona, recurring segments... */
   channelPrompt?: string | null;
+  /** Gemini's lessons from the channel's YouTube stats (see analytics.ts). */
+  performanceNotes?: string | null;
 }
 
 export interface GeneratedScript {
@@ -168,6 +170,7 @@ export function buildSystemInstruction(req: ScriptRequest): string {
     "Only state facts you are confident are accurate. Avoid precise statistics, dates or quotes unless they are well established.",
     "stockQuery is always in English, even when the narration is not.",
     req.channelPrompt?.trim() ? `Channel style guide from the operator:\n${req.channelPrompt.trim()}` : "",
+    req.performanceNotes?.trim() ? `Lessons from this channel's YouTube performance (apply them):\n${req.performanceNotes.trim()}` : "",
   ]
     .filter(Boolean)
     .join("\n");

@@ -39,6 +39,7 @@ export const ChannelInputSchema = z
   autopilotLeadHours: z.coerce.number().int().min(6, "At least 6 hours").max(168, "At most 7 days (168 hours)").default(36),
   autopilotVisualSource: z.enum(["POLLINATIONS", "PEXELS"]).default("POLLINATIONS"),
   topicBacklog: optionalText(10_000),
+  learnFromAnalytics: checkbox,
 })
   .refine((c) => !c.autopilot || c.postingCron, {
     message: "Autopilot fills posting slots, so it needs a posting schedule",

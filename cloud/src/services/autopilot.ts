@@ -2,6 +2,7 @@ import type { Channel, Scene, VideoProject } from "@/generated/prisma/client";
 import { ProjectStatus, VisualSource } from "@/generated/prisma/enums";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
+import { analyzeChannel, findChannelToAnalyze } from "./analytics";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets } from "./pipeline";
 import { findVideoToAutoPublish, publishRenderedProject } from "./publish";
 import { firstFreeSlot, formatSlot, isValidCron } from "./schedule";
@@ -32,7 +33,7 @@ export const PLANNING_PAUSE_MS = 12 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const VERIFY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type TickAction = "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "error" | "idle";
+export type TickAction = "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "error" | "idle";
 
 export interface TickResult {
   action: TickAction;
@@ -60,6 +61,8 @@ type AutopilotChannel = Pick<
   | "autopilotLeadHours"
   | "autopilotVisualSource"
   | "topicBacklog"
+  | "learnFromAnalytics"
+  | "performanceNotes"
 >;
 
 type WorkProject = Pick<VideoProject, "id" | "channelId" | "status" | "topic" | "title" | "autopilotFailures" | "scheduledFor"> & {
@@ -215,6 +218,7 @@ async function nextTopic(channel: AutopilotChannel): Promise<{ topic: string; so
     language: channel.language,
     format: channel.defaultFormat,
     channelPrompt: channel.defaultScriptPrompt,
+    performanceNotes: channel.learnFromAnalytics ? channel.performanceNotes : null,
     recentTopics: recent.flatMap((p) => [p.title, p.topic].filter((t): t is string => Boolean(t))),
   });
   return { topic, source: "Gemini" };
@@ -237,6 +241,24 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
     } catch (error) {
       const message = `${name} could not be published: ${errorMessage(error)}`;
       await log("error", "published", message, ids);
+      return { action: "error", message, more: true, swept, ...ids };
+    }
+  }
+
+  // Once a day per channel: read YouTube stats and relearn what makes its videos work.
+  const toAnalyze = await findChannelToAnalyze(now);
+  if (toAnalyze) {
+    const ids = { channelId: toAnalyze.id };
+    try {
+      const { updated, notes } = await analyzeChannel(toAnalyze, now);
+      const message = notes
+        ? `${toAnalyze.name}: stats refreshed for ${updated} video${updated === 1 ? "" : "s"}; lessons updated for future videos.`
+        : `${toAnalyze.name}: stats refreshed for ${updated} video${updated === 1 ? "" : "s"}; lessons start once 3 videos are 2+ days old.`;
+      await log("info", "analyzed", message, ids);
+      return { action: "analyzed", message, more: true, swept, ...ids };
+    } catch (error) {
+      const message = `${toAnalyze.name}: performance analysis failed: ${errorMessage(error)}`;
+      await log("error", "analyzed", message, ids);
       return { action: "error", message, more: true, swept, ...ids };
     }
   }
