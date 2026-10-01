@@ -1,11 +1,13 @@
 "use client";
 
-import { Bot, LoaderCircle, Play } from "lucide-react";
+import { Bot, LoaderCircle, Play, Plus } from "lucide-react";
 import Link from "next/link";
-import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { runAutopilotNowAction } from "@/app/(studio)/actions";
+import { createVideoNowAction, runAutopilotNowAction } from "@/app/(studio)/actions";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/form-controls";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -18,8 +20,33 @@ export interface AutopilotEventView {
   ago: string;
 }
 
-export function AutopilotPanel({ channelsOn, events }: { channelsOn: number; events: AutopilotEventView[] }) {
+export interface ChannelOption {
+  id: string;
+  name: string;
+  autopilot: boolean;
+}
+
+export function AutopilotPanel({ channelsOn, events, channels }: { channelsOn: number; events: AutopilotEventView[]; channels: ChannelOption[] }) {
+  const router = useRouter();
   const [running, startTransition] = useTransition();
+  const [creating, startCreate] = useTransition();
+  const [channelId, setChannelId] = useState(channels.find((c) => c.autopilot)?.id ?? channels[0]?.id ?? "");
+
+  const createNow = () =>
+    startCreate(async () => {
+      const result = await createVideoNowAction(channelId);
+      if (!result.ok) return void toast.error(result.error);
+      const { projectId, topic, autopilot, runError } = result.data;
+      if (!autopilot) {
+        // No autopilot on this channel: open the video and write its script right away.
+        toast.success(`Created "${topic}". Writing the script…`);
+        router.push(`/projects/${projectId}?autoscript=1`);
+      } else if (runError) {
+        toast.warning(`Created "${topic}", but the autopilot run didn't start (${runError}). The next scheduled run will make it.`);
+      } else {
+        toast.success(`Created "${topic}". The autopilot is making it now: script, voice, visuals, render.`);
+      }
+    });
 
   const runNow = () =>
     startTransition(async () => {
@@ -54,7 +81,23 @@ export function AutopilotPanel({ channelsOn, events }: { channelsOn: number; eve
           {running ? <LoaderCircle className="animate-spin" /> : <Play />} Run now
         </Button>
       </CardHeader>
-      <CardContent className="grid grid-cols-1">
+      <CardContent className="grid grid-cols-1 gap-4">
+        {channels.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {channels.length > 1 ? (
+              <Select value={channelId} onChange={(e) => setChannelId(e.target.value)} aria-label="Channel for the new video" className="h-8 w-auto min-w-0 flex-1 text-sm">
+                {channels.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            ) : null}
+            <Button size="sm" disabled={creating || !channelId} onClick={createNow} title="Plan a video now and have the autopilot make it, without waiting for a slot">
+              {creating ? <LoaderCircle className="animate-spin" /> : <Plus />} Create a video now
+            </Button>
+          </div>
+        ) : null}
         {events.length === 0 ? (
           <p className="text-sm text-muted-foreground">No autopilot activity yet.</p>
         ) : (

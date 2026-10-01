@@ -1,20 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
-  channel: { findMany: vi.fn(), update: vi.fn() },
+  channel: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   videoProject: { findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn(), create: vi.fn() },
   autopilotEvent: { create: vi.fn(), deleteMany: vi.fn() },
 }));
 const pipeline = vi.hoisted(() => ({ dispatchCloudRender: vi.fn(), fillSceneAssets: vi.fn(), generateProjectScript: vi.fn() }));
 const planner = vi.hoisted(() => ({ proposeTopic: vi.fn() }));
 const youtube = vi.hoisted(() => ({ checkYouTubeVisibility: vi.fn() }));
+const publish = vi.hoisted(() => ({ findVideoToAutoPublish: vi.fn(), publishRenderedProject: vi.fn() }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("./pipeline", async (importActual) => ({ ...(await importActual<typeof import("./pipeline")>()), ...pipeline }));
 vi.mock("./topicPlanner", () => planner);
 vi.mock("./youtube", () => youtube);
+vi.mock("./publish", () => publish);
 
-import { MAX_AUTOPILOT_FAILURES, autopilotTick } from "./autopilot";
+import { MAX_AUTOPILOT_FAILURES, autopilotTick, createVideoNow } from "./autopilot";
 
 const NOW = new Date("2026-09-29T00:00:00Z"); // Tuesday
 const CHANNEL = {
@@ -69,10 +71,29 @@ function projectsQuery({
 }
 
 beforeEach(() => {
-  for (const group of [...Object.values(db), pipeline, planner, youtube]) for (const fn of Object.values(group)) fn.mockReset();
+  for (const group of [...Object.values(db), pipeline, planner, youtube, publish]) for (const fn of Object.values(group)) fn.mockReset();
   db.channel.findMany.mockResolvedValue([CHANNEL]);
   db.videoProject.create.mockImplementation(async ({ data }) => ({ id: "new1", ...data }));
   projectsQuery({});
+  publish.findVideoToAutoPublish.mockResolvedValue(null);
+});
+
+describe("auto-publish catch-up", () => {
+  it("publishes a rendered video waiting on an auto-publish channel before anything else", async () => {
+    publish.findVideoToAutoPublish.mockResolvedValue({ id: "p9", channelId: "c1", title: "Tax tips", topic: "t" });
+    publish.publishRenderedProject.mockResolvedValue({ youtubeVideoId: "abc123def45", locked: false });
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "published", projectId: "p9", more: true });
+    expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
+  });
+
+  it("logs a failed publish and moves on", async () => {
+    publish.findVideoToAutoPublish.mockResolvedValue({ id: "p9", channelId: "c1", title: null, topic: "Tax tips" });
+    publish.publishRenderedProject.mockRejectedValue(new Error("quota exceeded"));
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "error", more: true });
+    expect(result.message).toContain("quota exceeded");
+  });
 });
 
 describe("autopilotTick", () => {
@@ -216,5 +237,22 @@ describe("autopilotTick", () => {
     const result = await autopilotTick(NOW);
     expect(result).toMatchObject({ action: "idle", more: false });
     expect(db.videoProject.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("createVideoNow", () => {
+  it("plans a video on the next free slot without waiting for the lead window", async () => {
+    db.channel.findUnique.mockResolvedValue({ ...CHANNEL, topicBacklog: "UPI tips\nGold vs FD" });
+    db.videoProject.findMany.mockResolvedValue([{ scheduledFor: new Date("2026-09-29T18:00:00Z") }]);
+    const created = await createVideoNow("c1", NOW);
+    expect(created).toMatchObject({ topic: "UPI tips", autopilot: true });
+    const { data } = db.videoProject.create.mock.calls[0][0];
+    expect(data).toMatchObject({ channelId: "c1", topic: "UPI tips", autopilot: true });
+    expect(data.scheduledFor.toISOString()).toBe("2026-09-30T18:00:00.000Z");
+  });
+
+  it("refuses paused channels", async () => {
+    db.channel.findUnique.mockResolvedValue({ ...CHANNEL, isActive: false });
+    await expect(createVideoNow("c1", NOW)).rejects.toThrow(/paused/);
   });
 });

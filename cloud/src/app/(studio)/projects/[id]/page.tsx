@@ -17,6 +17,7 @@ import { AUDIT_FORM_URL } from "@/services/youtubeVisibility";
 import { AutoRefresh } from "./_components/auto-refresh";
 import { MetadataForm } from "./_components/metadata-form";
 import { PreviewPlayer } from "./_components/preview-player";
+import { PublishPanel } from "./_components/publish-panel";
 import { SceneCard } from "./_components/scene-card";
 import { StudioToolbar } from "./_components/studio-toolbar";
 import { TimelineStrip } from "./_components/timeline-strip";
@@ -232,6 +233,22 @@ export default async function StudioPage({ params, searchParams }: Params) {
                     <VisibilityCheck projectId={project.id} />
                   </div>
                 ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+          {project.status !== ProjectStatus.PUBLISHED ? (
+            <Card className="gap-3">
+              <CardHeader>
+                <CardTitle>YouTube</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PublishPanel
+                  projectId={project.id}
+                  channelId={project.channelId}
+                  autoPublish={project.channel.autoPublish}
+                  youtubeConnected={Boolean(project.channel.oauthRefreshTokenEnc)}
+                  canPublish={project.status === ProjectStatus.RENDERED && Boolean(project.renderedVideoUrl) && !project.youtubeVideoId}
+                />
               </CardContent>
             </Card>
           ) : null}

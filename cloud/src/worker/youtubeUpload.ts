@@ -39,13 +39,16 @@ export function nextOffsetFromRange(range: string | null): number {
 }
 
 export async function uploadVideoToYouTube(input: {
-  filePath: string;
+  /** A local file (render worker) or the video bytes (studio publishing an already-rendered video). */
+  filePath?: string;
+  bytes?: Uint8Array;
   metadata: YouTubeVideoMetadata;
   accessToken: string;
   maxAttempts?: number;
   retryDelayMs?: number;
 }): Promise<{ videoId: string; visibility: ReportedVisibility | null }> {
-  const file = await readFile(input.filePath);
+  const file = input.bytes ? Buffer.from(input.bytes) : input.filePath ? await readFile(input.filePath) : null;
+  if (!file) throw new YouTubeUploadError("Nothing to upload", null);
   const size = file.length;
   const auth = { Authorization: `Bearer ${input.accessToken}` };
 

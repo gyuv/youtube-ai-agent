@@ -405,6 +405,18 @@ yourself in YouTube Studio if you want it public.
 - **Check visibility** on a published video asks YouTube for its current visibility (after your
   audit is approved, for example).
 - **Channels**: change the schedule, style or voice at any time. New videos use the new settings.
+- **Create a video now** (dashboard → Autopilot): makes one video immediately, without waiting for
+  a slot to come within the lead time. It takes the next topic (backlog first, then Gemini) and the
+  channel's next free posting slot. On autopilot channels it then starts an autopilot run; on other
+  channels it opens the new video and writes its script.
+- **Publishing to YouTube**: a video page's **YouTube** box has a **Publish to YouTube** button for
+  rendered videos (no re-render needed) and an **Auto-publish to YouTube** switch (the same as the
+  channel setting). With it on, new renders upload by themselves and the autopilot run (every 3
+  hours) publishes any rendered video still waiting, retrying a failed one every 6 hours.
+- **ElevenLabs voices (optional)**: add `ELEVENLABS_API_KEY` in Vercel (ElevenLabs → Profile →
+  API keys) and redeploy. Then in *Channels → Voice* pick **Gigi** or **Domi (ElevenLabs)**, or type
+  `elevenlabs:` followed by any voice ID from your ElevenLabs library. Captions stay word-timed. The
+  free ElevenLabs plan covers about 10,000 characters a month, roughly 10 Shorts.
 - **AI video scenes (optional)**: see [AI video clips with Wan2GP](#ai-video-clips-with-wan2gp-optional) below.
 - A typical week with review mode on: open the dashboard, review each *Ready for your review* video,
   fix anything, click **Dispatch Cloud Render**, and it publishes at its slot.
@@ -537,6 +549,7 @@ help with it.
 | `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | no | override the Gemini models |
 | `PEXELS_API_KEY` | for stock video | Pexels key |
 | `POLLINATIONS_TOKEN` | no | raises the AI image rate limit |
+| `ELEVENLABS_API_KEY` | for ElevenLabs voices | ElevenLabs API key |
 | `WAN2GP_WORKER_SECRET` | for AI video | random; also a Colab secret for the Wan2GP worker |
 | `GITHUB_DISPATCH_TOKEN` | yes | GitHub fine-grained token |
 | `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME` | yes | `gyuv`, `youtube-ai-agent` |
