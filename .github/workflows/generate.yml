@@ -56,21 +56,20 @@ jobs:
           cache: pip
           cache-dependency-path: kidzulagum/requirements.txt
 
-      - name: Install FFmpeg
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
-          ffmpeg -version | head -1
-
       - name: Install Python packages
         run: pip install -r requirements.txt
+
+      # MoviePy renders with the static FFmpeg build that imageio-ffmpeg ships (a pip wheel), so
+      # there is no slow apt-get install; this just confirms the binary is there.
+      - name: Check FFmpeg
+        run: python -c "import imageio_ffmpeg, subprocess; exe = imageio_ffmpeg.get_ffmpeg_exe(); print(subprocess.run([exe, '-version'], capture_output=True, text=True).stdout.splitlines()[0])"
 
       - name: Make and upload the episode
         run: python main.py
 
       - name: Keep the video and script (7 days)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: kidzulagum-${{ github.run_id }}
           path: |
