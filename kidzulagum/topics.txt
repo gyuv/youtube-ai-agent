@@ -1,0 +1,31 @@
+# One topic per line. The daily run rotates through these (a manual run can override it).
+Colors: red, blue and yellow
+Counting from 1 to 5
+Shapes: circle, square and triangle
+Farm animals and the sounds they make
+Fruits we love to eat
+Big and small
+Brushing our teeth
+Saying please and thank you
+Day and night
+Wild animals in the jungle
+Things that go: car, bus and train
+Happy, sad and excited feelings
+Washing our hands
+The letters A, B and C
+Counting from 6 to 10
+Up and down, in and out
+Colors of the rainbow
+Animals that live in the sea
+Hot and cold
+Our body: eyes, nose, ears and mouth
+Sharing our toys
+Bedtime routine
+Vegetables that make us strong
+Weather: sunny, rainy and windy
+Opposites: fast and slow
+Musical instruments and their sounds
+Bugs in the garden
+Kind words for our friends
+Fruits and their colors
+Clothes we wear

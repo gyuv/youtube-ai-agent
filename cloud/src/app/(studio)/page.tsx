@@ -1,5 +1,6 @@
 import { AlertTriangle, Bot, CalendarClock, Clapperboard, Cog, Lock, Plus, Radio, Youtube } from "lucide-react";
 import Link from "next/link";
+import { AutomationSwitch } from "@/components/automation-switch";
 import { AutopilotPanel } from "@/components/autopilot-panel";
 import { PageHeader, timeAgo } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -8,8 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ProjectStatus } from "@/generated/prisma/enums";
 import { cn } from "@/lib/utils";
+import { isFullyAutomated } from "@/services/channels";
 import { ACTIVE_STATUSES, getDashboard, type DashboardData } from "@/services/dashboard";
-import { formatSlot } from "@/services/schedule";
+import { formatSlot, isValidCron, nextPostingTimes } from "@/services/schedule";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +94,18 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </Card>
 
         <div className="grid min-w-0 grid-cols-1 content-start gap-6">
+          <AutomationSwitch
+            channels={data.channels.map((c) => {
+              const next = c.postingCron && isValidCron(c.postingCron) ? nextPostingTimes(c.postingCron, c.postingTimezone, 1)[0] : null;
+              return {
+                id: c.id,
+                name: c.name,
+                on: isFullyAutomated(c),
+                youtubeConnected: Boolean(c.oauthRefreshTokenEnc),
+                schedule: next ? `on schedule, next ${formatSlot(next, c.postingTimezone)}` : null,
+              };
+            })}
+          />
           <AutopilotPanel
             channelsOn={data.autopilot.channelsOn}
             channels={data.channels.filter((c) => c.isActive).map((c) => ({ id: c.id, name: c.name, autopilot: c.autopilot }))}

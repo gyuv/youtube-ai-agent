@@ -405,6 +405,9 @@ yourself in YouTube Studio if you want it public.
 - **Check visibility** on a published video asks YouTube for its current visibility (after your
   audit is approved, for example).
 - **Channels**: change the schedule, style or voice at any time. New videos use the new settings.
+- **Full automation switch** (dashboard): one switch per channel. On sets autopilot, auto-publish,
+  public posting, no review stop and performance learning, and adds a daily 7 am slot if the channel
+  has no schedule. Off stops the autopilot and auto-publish; videos already made stay as they are.
 - **Full automation with learning**: set a morning posting time (Channels → posting schedule, e.g.
   the *Daily 7 am* preset with your time zone), and turn on **Autopilot**, **Auto-publish** and
   **Learn from YouTube performance**. The autopilot then makes each video ahead of its slot, posts it,

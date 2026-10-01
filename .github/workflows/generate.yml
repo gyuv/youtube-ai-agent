@@ -1,0 +1,80 @@
+name: Kidzulagum episode
+
+# A new episode every day at 06:30 IST (01:00 UTC), plus a manual "Run workflow" button.
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: Episode topic (blank = next one from kidzulagum/topics.txt)
+        required: false
+        type: string
+      skip_upload:
+        description: Render only, don't upload (download the video from Artifacts)
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kidzulagum
+  cancel-in-progress: false
+
+jobs:
+  episode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: kidzulagum
+    env:
+      # Only the three YOUTUBE_* secrets are required; every other key is an optional extra fallback.
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      POLLINATIONS_TOKEN: ${{ secrets.POLLINATIONS_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+      KZ_PRIVACY: ${{ vars.KZ_PRIVACY || 'public' }}
+      # Untrusted text: only ever read through the environment, never interpolated into scripts.
+      KZ_TOPIC: ${{ inputs.topic }}
+      KZ_SKIP_UPLOAD: ${{ inputs.skip_upload }}
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: kidzulagum/requirements.txt
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffmpeg -version | head -1
+
+      - name: Install Python packages
+        run: pip install -r requirements.txt
+
+      - name: Make and upload the episode
+        run: python main.py
+
+      - name: Keep the video and script (7 days)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kidzulagum-${{ github.run_id }}
+          path: |
+            kidzulagum/output/video.mp4
+            kidzulagum/output/script.json
+          retention-days: 7
+          if-no-files-found: ignore
