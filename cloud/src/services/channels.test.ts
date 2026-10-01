@@ -7,7 +7,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("@/lib/crypto", () => ({ decryptSecret: (value: string) => value.replace(/^enc:/, "") }));
 vi.mock("./youtube", () => youtube);
 
-import { disconnectChannel } from "./channels";
+import { disconnectChannel, setFullAutomation } from "./channels";
 
 beforeEach(() => {
   db.channel.findUnique.mockReset();
@@ -37,5 +37,29 @@ describe("disconnectChannel", () => {
     await disconnectChannel("c1");
     expect(youtube.revokeGoogleGrant).not.toHaveBeenCalled();
     expect(db.channel.update).toHaveBeenCalled();
+  });
+});
+
+describe("setFullAutomation", () => {
+  it("turns on autopilot, auto-publish, public posting and learning, keeping an existing schedule", async () => {
+    const channel = { id: "c1", name: "Ch", oauthRefreshTokenEnc: "enc", postingCron: "0 9 * * *" };
+    db.channel.findUnique.mockResolvedValue(channel);
+    db.channel.update.mockImplementation(async ({ data }) => ({ ...channel, ...data }));
+    const updated = await setFullAutomation("c1", true);
+    expect(updated).toMatchObject({ autopilot: true, autoPublish: true, autopilotReview: false, learnFromAnalytics: true, defaultPrivacy: "PUBLIC", postingCron: "0 9 * * *" });
+  });
+
+  it("adds a daily 7 am slot when there is no schedule, and refuses without YouTube", async () => {
+    db.channel.findUnique.mockResolvedValue({ id: "c1", name: "Ch", oauthRefreshTokenEnc: "enc", postingCron: null });
+    db.channel.update.mockImplementation(async ({ data }) => data);
+    expect(await setFullAutomation("c1", true)).toMatchObject({ postingCron: "0 7 * * *" });
+    db.channel.findUnique.mockResolvedValue({ id: "c1", name: "Ch", oauthRefreshTokenEnc: null });
+    await expect(setFullAutomation("c1", true)).rejects.toThrow(/Connect "Ch" to YouTube/);
+  });
+
+  it("switching off stops the autopilot and auto-publish only", async () => {
+    db.channel.findUnique.mockResolvedValue({ id: "c1", name: "Ch" });
+    db.channel.update.mockImplementation(async ({ data }) => data);
+    expect(await setFullAutomation("c1", false)).toEqual({ autopilot: false, autoPublish: false });
   });
 });

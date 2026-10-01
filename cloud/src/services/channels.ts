@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Channel } from "@/generated/prisma/client";
 import { PrivacyStatus, VideoFormat } from "@/generated/prisma/enums";
 import { decryptSecret } from "@/lib/crypto";
 import { PipelineError } from "@/lib/errors";
@@ -84,4 +85,37 @@ export async function disconnectChannel(id: string) {
     if (token && !(await revokeGoogleGrant(token))) console.warn(`Google did not confirm revoking the grant for channel ${id}`);
   }
   return prisma.channel.update({ where: { id }, data: CLEARED_GRANT });
+}
+
+/** The morning slot full automation falls back to when a channel has no posting schedule yet. */
+export const DEFAULT_AUTOMATION_CRON = "0 7 * * *";
+
+/**
+ * The dashboard's master switch. On: autopilot makes each video, auto-publish posts it publicly at
+ * the channel's slot (a daily 7 am slot if it has none), no review stop, and performance learning.
+ * Off: the autopilot and auto-publish stop; nothing already made is touched.
+ */
+export async function setFullAutomation(id: string, enabled: boolean) {
+  const channel = await getChannel(id);
+  if (!enabled) return prisma.channel.update({ where: { id }, data: { autopilot: false, autoPublish: false } });
+  if (!channel.oauthRefreshTokenEnc) {
+    throw new PipelineError("CONFLICT", `Connect "${channel.name}" to YouTube first (Channels → ${channel.name} → Connect YouTube).`);
+  }
+  return prisma.channel.update({
+    where: { id },
+    data: {
+      isActive: true,
+      autopilot: true,
+      autoPublish: true,
+      autopilotReview: false,
+      learnFromAnalytics: true,
+      // Only public videos can be scheduled for their slot; others would go live as soon as rendered.
+      defaultPrivacy: "PUBLIC",
+      postingCron: channel.postingCron && isValidCron(channel.postingCron) ? channel.postingCron : DEFAULT_AUTOMATION_CRON,
+    },
+  });
+}
+
+export function isFullyAutomated(c: Pick<Channel, "autopilot" | "autoPublish" | "isActive">): boolean {
+  return c.isActive && c.autopilot && c.autoPublish;
 }

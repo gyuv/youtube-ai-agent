@@ -6,6 +6,7 @@ import { toActionResult, type ActionResult } from "@/lib/action";
 import { requireOperator } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { createVideoNow } from "@/services/autopilot";
+import { setFullAutomation } from "@/services/channels";
 import { dispatchAutopilotRun } from "@/services/renderDispatcher";
 
 /** Start the autopilot workflow now instead of waiting for its next scheduled run. */
@@ -33,5 +34,17 @@ export async function createVideoNowAction(
     return { ...created, runError };
   });
   revalidatePath("/");
+  return result;
+}
+
+/** The dashboard's master automation switch for one channel. */
+export async function setFullAutomationAction(channelId: string, enabled: boolean): Promise<ActionResult> {
+  await requireOperator();
+  const result = await toActionResult(async () => {
+    await setFullAutomation(z.string().min(1).parse(channelId), z.boolean().parse(enabled));
+    return null;
+  });
+  revalidatePath("/");
+  revalidatePath("/channels");
   return result;
 }
