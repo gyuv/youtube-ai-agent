@@ -94,6 +94,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <div className="grid min-w-0 grid-cols-1 content-start gap-6">
           <AutopilotPanel
             channelsOn={data.autopilot.channelsOn}
+            channels={data.channels.filter((c) => c.isActive).map((c) => ({ id: c.id, name: c.name, autopilot: c.autopilot }))}
             events={data.autopilot.events.map((e) => ({ id: e.id, action: e.action, level: e.level, message: e.message, projectId: e.projectId, ago: timeAgo(e.createdAt) }))}
           />
           <ScheduleCard schedule={data.schedule} />

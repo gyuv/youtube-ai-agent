@@ -1,6 +1,6 @@
 import type { Channel, Scene, VideoProject } from "@/generated/prisma/client";
 import { ProjectStatus, VisualSource } from "@/generated/prisma/enums";
-import { errorMessage } from "@/lib/errors";
+import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets } from "./pipeline";
 import { findVideoToAutoPublish, publishRenderedProject } from "./publish";
@@ -372,6 +372,38 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
   }
   // Nothing could be planned; retry on the next scheduled run rather than hammering Gemini now.
   return { action: "error", message: failures.join(" | "), more: false, swept };
+}
+
+/**
+ * "Create a video now": plan one video immediately instead of waiting for a slot to enter the
+ * lead window. It takes the channel's next free posting slot (or none, to publish as soon as it's
+ * rendered) and the next topic, then the autopilot carries it through script, voice, visuals and
+ * render. Channels without the autopilot get the project only; the studio opens it to finish.
+ */
+export async function createVideoNow(channelId: string, now: Date = new Date()) {
+  const channel = await prisma.channel.findUnique({ where: { id: channelId } });
+  if (!channel) throw new PipelineError("NOT_FOUND", `Channel ${channelId} not found.`);
+  if (!channel.isActive) throw new PipelineError("CONFLICT", `Channel "${channel.name}" is paused. Turn it on in Channels first.`);
+
+  const taken = await prisma.videoProject.findMany({
+    where: { channelId, scheduledFor: { gte: now } },
+    select: { scheduledFor: true },
+  });
+  const slot = firstFreeSlot(channel, taken.map((p) => p.scheduledFor!), now);
+  const { topic, source } = await nextTopic(channel);
+  const project = await prisma.videoProject.create({
+    data: {
+      channelId,
+      topic,
+      format: channel.defaultFormat,
+      privacy: channel.defaultPrivacy,
+      scheduledFor: slot,
+      autopilot: channel.autopilot,
+    },
+  });
+  const when = slot ? `for ${formatSlot(slot, channel.postingTimezone)}` : "to publish once rendered";
+  await log("info", "planned", `Created "${topic}" (from ${source}) ${when} on ${channel.name}, on request.`, { channelId, projectId: project.id });
+  return { projectId: project.id, topic, autopilot: channel.autopilot };
 }
 
 export async function recentAutopilotEvents(limit = 12) {

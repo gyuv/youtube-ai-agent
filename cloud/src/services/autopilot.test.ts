@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
-  channel: { findMany: vi.fn(), update: vi.fn() },
+  channel: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   videoProject: { findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn(), create: vi.fn() },
   autopilotEvent: { create: vi.fn(), deleteMany: vi.fn() },
 }));
@@ -16,7 +16,7 @@ vi.mock("./topicPlanner", () => planner);
 vi.mock("./youtube", () => youtube);
 vi.mock("./publish", () => publish);
 
-import { MAX_AUTOPILOT_FAILURES, autopilotTick } from "./autopilot";
+import { MAX_AUTOPILOT_FAILURES, autopilotTick, createVideoNow } from "./autopilot";
 
 const NOW = new Date("2026-09-29T00:00:00Z"); // Tuesday
 const CHANNEL = {
@@ -237,5 +237,22 @@ describe("autopilotTick", () => {
     const result = await autopilotTick(NOW);
     expect(result).toMatchObject({ action: "idle", more: false });
     expect(db.videoProject.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("createVideoNow", () => {
+  it("plans a video on the next free slot without waiting for the lead window", async () => {
+    db.channel.findUnique.mockResolvedValue({ ...CHANNEL, topicBacklog: "UPI tips\nGold vs FD" });
+    db.videoProject.findMany.mockResolvedValue([{ scheduledFor: new Date("2026-09-29T18:00:00Z") }]);
+    const created = await createVideoNow("c1", NOW);
+    expect(created).toMatchObject({ topic: "UPI tips", autopilot: true });
+    const { data } = db.videoProject.create.mock.calls[0][0];
+    expect(data).toMatchObject({ channelId: "c1", topic: "UPI tips", autopilot: true });
+    expect(data.scheduledFor.toISOString()).toBe("2026-09-30T18:00:00.000Z");
+  });
+
+  it("refuses paused channels", async () => {
+    db.channel.findUnique.mockResolvedValue({ ...CHANNEL, isActive: false });
+    await expect(createVideoNow("c1", NOW)).rejects.toThrow(/paused/);
   });
 });

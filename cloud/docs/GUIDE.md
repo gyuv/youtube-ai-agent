@@ -405,6 +405,10 @@ yourself in YouTube Studio if you want it public.
 - **Check visibility** on a published video asks YouTube for its current visibility (after your
   audit is approved, for example).
 - **Channels**: change the schedule, style or voice at any time. New videos use the new settings.
+- **Create a video now** (dashboard → Autopilot): makes one video immediately, without waiting for
+  a slot to come within the lead time. It takes the next topic (backlog first, then Gemini) and the
+  channel's next free posting slot. On autopilot channels it then starts an autopilot run; on other
+  channels it opens the new video and writes its script.
 - **Publishing to YouTube**: a video page's **YouTube** box has a **Publish to YouTube** button for
   rendered videos (no re-render needed) and an **Auto-publish to YouTube** switch (the same as the
   channel setting). With it on, new renders upload by themselves and the autopilot run (every 3
