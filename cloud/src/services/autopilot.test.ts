@@ -8,6 +8,7 @@ const db = vi.hoisted(() => ({
 const pipeline = vi.hoisted(() => ({ dispatchCloudRender: vi.fn(), fillSceneAssets: vi.fn(), generateProjectScript: vi.fn() }));
 const planner = vi.hoisted(() => ({ proposeTopic: vi.fn() }));
 const youtube = vi.hoisted(() => ({ checkYouTubeVisibility: vi.fn() }));
+const analytics = vi.hoisted(() => ({ findChannelToAnalyze: vi.fn(), analyzeChannel: vi.fn() }));
 const publish = vi.hoisted(() => ({ findVideoToAutoPublish: vi.fn(), publishRenderedProject: vi.fn() }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
@@ -15,6 +16,7 @@ vi.mock("./pipeline", async (importActual) => ({ ...(await importActual<typeof i
 vi.mock("./topicPlanner", () => planner);
 vi.mock("./youtube", () => youtube);
 vi.mock("./publish", () => publish);
+vi.mock("./analytics", () => analytics);
 
 import { MAX_AUTOPILOT_FAILURES, autopilotTick, createVideoNow } from "./autopilot";
 
@@ -71,11 +73,12 @@ function projectsQuery({
 }
 
 beforeEach(() => {
-  for (const group of [...Object.values(db), pipeline, planner, youtube, publish]) for (const fn of Object.values(group)) fn.mockReset();
+  for (const group of [...Object.values(db), pipeline, planner, youtube, publish, analytics]) for (const fn of Object.values(group)) fn.mockReset();
   db.channel.findMany.mockResolvedValue([CHANNEL]);
   db.videoProject.create.mockImplementation(async ({ data }) => ({ id: "new1", ...data }));
   projectsQuery({});
   publish.findVideoToAutoPublish.mockResolvedValue(null);
+  analytics.findChannelToAnalyze.mockResolvedValue(null);
 });
 
 describe("auto-publish catch-up", () => {
@@ -254,5 +257,15 @@ describe("createVideoNow", () => {
   it("refuses paused channels", async () => {
     db.channel.findUnique.mockResolvedValue({ ...CHANNEL, isActive: false });
     await expect(createVideoNow("c1", NOW)).rejects.toThrow(/paused/);
+  });
+});
+
+describe("daily performance analysis", () => {
+  it("refreshes stats and relearns once a day, then keeps going", async () => {
+    analytics.findChannelToAnalyze.mockResolvedValue({ ...CHANNEL });
+    analytics.analyzeChannel.mockResolvedValue({ updated: 4, notes: "- Specific rupee amounts in titles win" });
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "analyzed", more: true, channelId: "c1" });
+    expect(result.message).toContain("lessons updated");
   });
 });

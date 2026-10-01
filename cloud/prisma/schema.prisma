@@ -98,6 +98,10 @@ model Channel {
   autopilotLeadHours    Int          @default(36) // how far ahead of a slot production starts
   autopilotVisualSource VisualSource @default(POLLINATIONS)
   topicBacklog          String?      @db.Text // one topic per line, used before Gemini ideas
+  // Performance learning: Gemini's lessons from this channel's YouTube stats, fed into new topics and scripts.
+  learnFromAnalytics    Boolean      @default(true)
+  performanceNotes      String?      @db.Text
+  performanceNotesAt    DateTime?
 
   projects VideoProject[]
 
@@ -147,6 +151,11 @@ model VideoProject {
   // Google Cloud projects get every API upload locked private until the YouTube API audit passes.
   youtubeLocked    Boolean   @default(false)
   youtubeCheckedAt DateTime? // last time the video's visibility was read back from YouTube
+  // YouTube statistics, refreshed daily by the autopilot for recently published videos.
+  viewCount        Int?
+  likeCount        Int?
+  commentCount     Int?
+  statsUpdatedAt   DateTime?
 
   // Created and advanced by the autopilot; it never touches operator-made projects.
   autopilot         Boolean @default(false)

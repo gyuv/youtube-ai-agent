@@ -33,9 +33,13 @@ type ChannelFields = Pick<
   | "autopilotLeadHours"
   | "autopilotVisualSource"
   | "topicBacklog"
+  | "learnFromAnalytics"
+  | "performanceNotes"
+  | "performanceNotesAt"
 >;
 
 const CRON_PRESETS = [
+  { label: "Daily 7 am", cron: "0 7 * * *" },
   { label: "Daily 6 pm", cron: "0 18 * * *" },
   { label: "Mon · Wed · Fri 6 pm", cron: "0 18 * * 1,3,5" },
   { label: "Weekdays 9 am", cron: "0 9 * * 1-5" },
@@ -255,6 +259,24 @@ export function ChannelForm({ channelId, initial, youtubeConnected }: { channelI
                   <option value="PEXELS">Stock B-roll (Pexels)</option>
                 </Select>
               </Field>
+            </div>
+            <div className="grid gap-2 rounded-lg border p-3">
+              <Label className="font-normal">
+                <Switch name="learnFromAnalytics" defaultChecked={initial?.learnFromAnalytics ?? true} />
+                Learn from YouTube performance and use it for future videos
+              </Label>
+              <FieldHint>
+                Once a day the autopilot reads each published video&apos;s views, likes and comments, and Gemini works out what your best
+                videos have in common. Those lessons shape every new topic and script. Needs YouTube connected and 3 videos at least 2 days old.
+              </FieldHint>
+              {initial?.performanceNotes ? (
+                <div className="grid gap-1">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    What it has learned{initial.performanceNotesAt ? ` (updated ${initial.performanceNotesAt.toLocaleDateString("en-GB")})` : ""}
+                  </span>
+                  <p className="whitespace-pre-line rounded-md bg-muted/50 p-2 text-sm">{initial.performanceNotes}</p>
+                </div>
+              ) : null}
             </div>
             <Field id="topicBacklog" label="Topic backlog" error={errors.topicBacklog} hint="One topic per line, used first and in order. When it runs out, Gemini suggests topics that don't repeat earlier videos.">
               <Textarea id="topicBacklog" name="topicBacklog" defaultValue={initial?.topicBacklog ?? ""} rows={4} placeholder={"How UPI changed small shops\nIs gold still worth buying in 2026?"} />
