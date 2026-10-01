@@ -405,6 +405,13 @@ yourself in YouTube Studio if you want it public.
 - **Check visibility** on a published video asks YouTube for its current visibility (after your
   audit is approved, for example).
 - **Channels**: change the schedule, style or voice at any time. New videos use the new settings.
+- **Script Lab, Edit Lab and Growth Lab** (top menu): the eleven tools from
+  [youtube-agent-skill](https://github.com/Jakeschincariol/youtube-agent-skill) (MIT), adapted to the
+  channel you pick: its niche, audience, style guide, learned lessons and real video stats.
+  *Script Lab*: script with five hooks scored, title + thumbnail lint, SEO. *Edit Lab*: edit list,
+  chapters, Shorts finder, retention reader. *Growth Lab*: weekly plan, viral outliers in your niche
+  (searches YouTube, about 110 quota units), channel audit, comment replies. Pick one of your videos
+  to pre-fill its idea and its timed transcript, and apply titles, SEO copy or chapters back to it.
 - **Full automation switch** (dashboard): one switch per channel. On sets autopilot, auto-publish,
   public posting, no review stop and performance learning, and adds a daily 7 am slot if the channel
   has no schedule. Off stops the autopilot and auto-publish; videos already made stay as they are.
