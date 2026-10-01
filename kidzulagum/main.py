@@ -231,8 +231,53 @@ def _pollinations_text(prompt: str) -> str:
     )
 
 
+def _pollinations_simple(prompt: str) -> str:
+    """Pollinations' plain GET text endpoint (a second keyless route)."""
+    token = os.environ.get("POLLINATIONS_TOKEN", "").strip()
+    res = requests.get(
+        "https://text.pollinations.ai/" + urllib.parse.quote(prompt[:3500]),
+        params={"model": os.environ.get("POLLINATIONS_TEXT_MODEL", "openai"), "json": "true", "seed": random.randint(1, 10**6)},
+        headers={"Authorization": f"Bearer {token}"} if token else {},
+        timeout=180,
+    )
+    res.raise_for_status()
+    return res.text
+
+
+def topic_items(topic: str) -> tuple[str, list[str]]:
+    """'Colors: red, blue and yellow' -> ('Colors', ['red', 'blue', 'yellow'])."""
+    head, _, tail = topic.partition(":")
+    items = [i.strip() for i in tail.replace(" and ", ",").split(",") if i.strip()] if tail else []
+    return head.strip() or topic, items or [topic]
+
+
+def template_script(topic: str) -> dict:
+    """An offline episode built from the topic, used only when every AI provider is down."""
+    theme, items = topic_items(topic)
+    scenes = [
+        ("Milo the cat and Coco the puppy waving hello in a bright playroom, happy smiles", "Hello friends! Welcome to Kidzulagum! I am Milo the cat. And I am Coco the puppy!"),
+        ("Milo and Coco sitting together, looking excited at the viewer", f"Today we are learning about {theme.lower()}! Are you ready? Yay!"),
+    ]
+    for item in items[:6]:
+        scenes += [
+            (f"Milo and Coco pointing happily at a big, colorful {item} in the middle of the room", f"Look! This is {item}. Can you say {item}? ... {item}! Great job!"),
+            (f"Coco the puppy jumping with joy next to a {item} while Milo the cat claps", f"Let's say it together, one more time. {item}! You are so clever!"),
+        ]
+    scenes += [
+        ("Milo and Coco clapping their paws, little stars and confetti around them", "Now let's clap together! Clap, clap, clap! Hooray!"),
+        (f"Milo and Coco in front of a row of {', '.join(items[:6])}, smiling", "Let's remember them all! " + ", ".join(items[:6]) + "! Wonderful!"),
+        ("Milo and Coco waving goodbye under a rainbow", "You did so well today! Bye-bye, friends! See you next time on Kidzulagum!"),
+    ]
+    return {
+        "title": f"Learn {theme} with Milo and Coco | Kidzulagum"[:100],
+        "description": f"Milo the cat and Coco the puppy help little ones learn {theme.lower()} with songs, repetition and fun. Perfect for toddlers and preschoolers.",
+        "tags": ["kids learning", "toddler learning", "preschool", theme.lower(), "cat and puppy", "learning for kids", "nursery", "educational video"],
+        "scenes": [{"image_prompt": i, "tts_text": t} for i, t in scenes],
+    }
+
+
 def generate_script(topic: str) -> dict:
-    """Gemini first, then Groq, then Pollinations (keyless), so a quota never skips an episode."""
+    """Gemini, then Groq, then Pollinations (keyless), then a built-in template: an episode always gets a script."""
     prompt = build_script_prompt(topic) + "\nJSON keys: title, description, tags (array), scenes (array of {image_prompt, tts_text})."
     providers = []
     if os.environ.get("GEMINI_API_KEY", "").strip():
@@ -240,6 +285,7 @@ def generate_script(topic: str) -> dict:
     if os.environ.get("GROQ_API_KEY", "").strip():
         providers.append(("Groq", _groq))
     providers.append(("Pollinations", _pollinations_text))
+    providers.append(("Pollinations (simple)", _pollinations_simple))
 
     errors = []
     for name, call in providers:
@@ -252,7 +298,8 @@ def generate_script(topic: str) -> dict:
                 errors.append(f"{name} #{attempt + 1}: {str(error)[:200]}")
                 log(f"  {errors[-1]}")
                 time.sleep(5 * (attempt + 1))
-    sys.exit("No script provider worked:\n" + "\n".join(errors))
+    log("Every AI script provider failed; using the built-in episode template. Add GEMINI_API_KEY for better scripts.")
+    return parse_script(json.dumps(template_script(topic)))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -336,6 +383,40 @@ def available_image_providers():
     return [(name, makers[name][0]) for name in IMAGE_PROVIDERS if name in makers and makers[name][1]]
 
 
+def offline_card(scene: Scene) -> Image.Image:
+    """Last resort when every image service is down: a bright card with the scene's line."""
+    from PIL import ImageDraw, ImageFont
+
+    w, h = VIDEO_SIZE
+    palette = [((255, 214, 102), (255, 140, 105)), ((129, 212, 250), (149, 117, 205)), ((165, 214, 167), (77, 182, 172))]
+    top, bottom = palette[scene.index % len(palette)]
+    ramp = np.linspace(0, 1, h)[:, None, None]
+    pixels = (np.array(top) * (1 - ramp) + np.array(bottom) * ramp).repeat(w, axis=1).astype("uint8")
+    card = Image.fromarray(pixels)
+    draw = ImageDraw.Draw(card)
+    for i in range(14):  # playful bubbles
+        r = random.randint(30, 110)
+        x, y = random.randint(0, w), random.randint(0, h)
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=(255, 255, 255))
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 88)
+    except OSError:
+        font = ImageFont.load_default()
+    words, lines, line = scene.tts_text.split(), [], ""
+    for word in words:
+        if len(line) + len(word) > 26:
+            lines.append(line)
+            line = ""
+        line = f"{line} {word}".strip()
+    lines.append(line)
+    y = h // 2 - len(lines[:5]) * 55
+    for text in lines[:5]:
+        tw = draw.textlength(text, font=font)
+        draw.text(((w - tw) / 2, y), text, font=font, fill=(60, 40, 90), stroke_width=4, stroke_fill=(255, 255, 255))
+        y += 110
+    return card
+
+
 def generate_image(scene: Scene, seed: int) -> None:
     prompt = f"{scene.image_prompt.strip().rstrip('.')}. The hosts: {HOST_LOOK}{IMAGE_SUFFIX}"
     errors = []
@@ -347,7 +428,8 @@ def generate_image(scene: Scene, seed: int) -> None:
         except Exception as error:
             errors.append(f"{name}: {str(error)[:120]}")
             log(f"  {errors[-1]}")
-    raise RuntimeError("No image provider worked: " + " | ".join(errors))
+    log(f"  every image service failed ({' | '.join(errors)[:200]}); using an offline card")
+    offline_card(scene).save(scene.image, "JPEG", quality=92)
 
 
 async def _speak(text: str, path: Path) -> None:

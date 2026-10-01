@@ -69,7 +69,7 @@ jobs:
 
       - name: Keep the video and script (7 days)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: kidzulagum-${{ github.run_id }}
           path: |
