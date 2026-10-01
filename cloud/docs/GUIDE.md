@@ -405,8 +405,49 @@ yourself in YouTube Studio if you want it public.
 - **Check visibility** on a published video asks YouTube for its current visibility (after your
   audit is approved, for example).
 - **Channels**: change the schedule, style or voice at any time. New videos use the new settings.
+- **AI video scenes (optional)**: see [AI video clips with Wan2GP](#ai-video-clips-with-wan2gp-optional) below.
 - A typical week with review mode on: open the dashboard, review each *Ready for your review* video,
   fix anything, click **Dispatch Cloud Render**, and it publishes at its slot.
+
+### AI video clips with Wan2GP (optional)
+
+[Wan2GP](https://github.com/deepbeepmeep/Wan2GP) turns a text prompt into a real moving AI video
+clip. It needs an NVIDIA GPU, which Vercel and GitHub don't offer, so it runs in a free Google Colab
+notebook that collects the work from your studio. Lumen never connects to Colab, so you don't need a
+tunnel or a public link.
+
+**One-time setup**
+1. Create a secret: 32+ random characters (`openssl rand -hex 32`, or any password generator).
+2. Vercel → your project → *Settings → Environment Variables*: add `WAN2GP_WORKER_SECRET` with that
+   value, then redeploy.
+3. Open [`cloud/colab/wan2gp_worker.ipynb`](../colab/wan2gp_worker.ipynb) in Colab (*File → Open
+   notebook → GitHub*, paste this repository's URL). In the 🔑 **Secrets** panel add `LUMEN_URL`
+   (your studio URL, e.g. `https://lumen.vercel.app`) and `WAN2GP_WORKER_SECRET`, and switch on
+   notebook access for both.
+
+**Each time you want AI video**
+1. In a project, open a scene → *Visual* → **AI video**. Edit the prompt (describe the subject,
+   the action and the camera move), then click **Queue AI video**. Queue as many scenes as you like.
+2. In Colab: *Runtime → Change runtime type → T4 GPU*, then *Runtime → Run all*. The first run
+   installs Wan2GP and downloads the model (about 10 minutes); after that each clip takes a few
+   minutes on a T4.
+3. Each scene shows *Waiting*, then *Generating*. The clip appears on its own when it's done. Until
+   then the scene keeps its image, so you can still render at any time. A scene that was still
+   waiting simply renders with its image.
+
+**Good to know**
+- Clips are 480p and up to 5 seconds. The renderer scales them to 1080p and loops them to cover
+  longer narration. For long scenes, split the narration or use stock B-roll instead.
+- Free Colab sessions end after a few hours, or sooner if the tab sits idle. A clip that was
+  interrupted goes back in the queue after 45 minutes. Run the notebook again to finish it.
+- The default `t2v_1.3B` model fits a free T4. Bigger models (`t2v`, `t2v_2_2`, or `i2v` to
+  animate the scene's existing image) need a paid Colab GPU such as an A100, or your own PC. The
+  same worker script runs on any NVIDIA machine:
+  `LUMEN_URL=… WAN2GP_WORKER_SECRET=… python cloud/colab/wan2gp_worker.py --wan2gp-dir /path/to/Wan2GP`.
+- Autopilot doesn't queue AI video. It keeps using AI images or stock B-roll, so it never waits
+  on a GPU that might be offline.
+- If a scene says *Wan2GP failed*, the error comes from the worker (often "CUDA out of memory": lower
+  the frames or steps in the notebook's Settings cell). Click **Queue AI video** to try again.
 
 ## 13. Limits of the free tiers
 
@@ -496,6 +537,7 @@ help with it.
 | `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | no | override the Gemini models |
 | `PEXELS_API_KEY` | for stock video | Pexels key |
 | `POLLINATIONS_TOKEN` | no | raises the AI image rate limit |
+| `WAN2GP_WORKER_SECRET` | for AI video | random; also a Colab secret for the Wan2GP worker |
 | `GITHUB_DISPATCH_TOKEN` | yes | GitHub fine-grained token |
 | `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME` | yes | `gyuv`, `youtube-ai-agent` |
 | `RENDER_WEBHOOK_SECRET` | yes | random; also a GitHub secret |

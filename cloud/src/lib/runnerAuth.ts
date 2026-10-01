@@ -1,15 +1,16 @@
 import { secretsMatch } from "./crypto";
 
 /**
- * GitHub Actions runners (render worker, autopilot) authenticate to the app with
- * `Authorization: Bearer <RENDER_WEBHOOK_SECRET>`. Returns an error response, or null if allowed.
+ * Workers outside Vercel authenticate to the app with `Authorization: Bearer <secret>`:
+ * GitHub Actions runners (render worker, autopilot) use RENDER_WEBHOOK_SECRET and the
+ * Wan2GP GPU worker uses WAN2GP_WORKER_SECRET. Returns an error response, or null if allowed.
  */
 const MIN_SECRET_LENGTH = 32;
 
-export function rejectUnlessRunner(request: Request): Response | null {
-  const secret = process.env.RENDER_WEBHOOK_SECRET?.trim();
+export function rejectUnlessBearer(request: Request, secretEnv: string): Response | null {
+  const secret = process.env[secretEnv]?.trim();
   if (!secret || secret.length < MIN_SECRET_LENGTH) {
-    console.error(`RENDER_WEBHOOK_SECRET is missing or shorter than ${MIN_SECRET_LENGTH} characters`);
+    console.error(`${secretEnv} is missing or shorter than ${MIN_SECRET_LENGTH} characters`);
     return Response.json({ error: "Runner access is not configured" }, { status: 503 });
   }
   const header = request.headers.get("authorization") ?? "";
@@ -18,4 +19,8 @@ export function rejectUnlessRunner(request: Request): Response | null {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   return null;
+}
+
+export function rejectUnlessRunner(request: Request): Response | null {
+  return rejectUnlessBearer(request, "RENDER_WEBHOOK_SECRET");
 }
