@@ -62,6 +62,9 @@ export default async function StudioPage({ params, searchParams }: Params) {
       imageUrl: s.imageUrl,
       videoClipUrl: s.videoClipUrl,
       visualSource: s.visualSource,
+      aiClipStatus: s.aiClipStatus,
+      aiClipPrompt: s.aiClipPrompt,
+      aiClipError: s.aiClipError,
       durationSeconds: s.durationSeconds,
       locked: s.locked,
       ready: sceneHasAssets(s),
@@ -71,6 +74,8 @@ export default async function StudioPage({ params, searchParams }: Params) {
 
   const editable = EDITABLE_STATUSES.includes(project.status);
   const inFlight = IN_FLIGHT_STATUSES.includes(project.status);
+  // Wan2GP clips arrive from the GPU worker on their own; poll so they show up without a reload.
+  const clipsPending = scenes.some((s) => s.aiClipStatus === "QUEUED" || s.aiClipStatus === "RUNNING");
   const readyCount = scenes.filter((s) => s.ready).length;
   const pending = scenes.filter((s) => !s.ready && !s.locked).map((s) => ({ id: s.id, sceneIndex: s.sceneIndex }));
   const renderBlocker = inFlight
@@ -95,7 +100,7 @@ export default async function StudioPage({ params, searchParams }: Params) {
 
   return (
     <>
-      <AutoRefresh active={inFlight} />
+      <AutoRefresh active={inFlight || clipsPending} intervalMs={inFlight ? 8000 : 20000} />
       <Link href="/" className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ChevronLeft className="size-4" /> Dashboard
       </Link>

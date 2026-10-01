@@ -13,7 +13,11 @@ export interface StudioScene {
   stockQuery: string | null;
   imageUrl: string | null;
   videoClipUrl: string | null;
-  visualSource: "POLLINATIONS" | "PEXELS" | "UPLOAD";
+  visualSource: "POLLINATIONS" | "PEXELS" | "UPLOAD" | "WAN2GP";
+  /** Wan2GP clip request, handled by the GPU worker. Null when there is none. */
+  aiClipStatus: "QUEUED" | "RUNNING" | "FAILED" | null;
+  aiClipPrompt: string | null;
+  aiClipError: string | null;
   durationSeconds: number;
   locked: boolean;
   ready: boolean;

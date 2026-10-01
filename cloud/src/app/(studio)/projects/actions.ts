@@ -15,6 +15,7 @@ import {
   type SceneFillResult,
 } from "@/services/pipeline";
 import { createProject, deleteProject, setSceneLocked, updateProjectMetadata } from "@/services/projects";
+import { cancelSceneClip, queueSceneClip } from "@/services/wan2gp";
 import { checkYouTubeVisibility } from "@/services/youtube";
 
 const Id = z.string().regex(/^[a-z0-9]{20,40}$/, "Invalid id");
@@ -153,6 +154,26 @@ export async function setSceneLockedAction(projectId: string, sceneId: string, l
   await requireOperator();
   const result = await toActionResult(async () => {
     await setSceneLocked(Id.parse(sceneId), z.boolean().parse(locked));
+    return null;
+  });
+  refresh(projectId);
+  return result;
+}
+
+export async function queueAiClipAction(projectId: string, sceneId: string, prompt: string): Promise<ActionResult> {
+  await requireOperator();
+  const result = await toActionResult(async () => {
+    await queueSceneClip(Id.parse(sceneId), z.string().max(1500).parse(prompt));
+    return null;
+  });
+  refresh(projectId);
+  return result;
+}
+
+export async function cancelAiClipAction(projectId: string, sceneId: string): Promise<ActionResult> {
+  await requireOperator();
+  const result = await toActionResult(async () => {
+    await cancelSceneClip(Id.parse(sceneId));
     return null;
   });
   refresh(projectId);

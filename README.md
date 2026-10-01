@@ -13,7 +13,8 @@ installed locally.
   language, and suggests new topics that don't repeat earlier videos.
 - **Voices** each scene with Microsoft Edge neural voices, including Indian English and Hindi, with
   word-timed captions.
-- **Illustrates** each scene with AI images (Pollinations) or real stock video (Pexels).
+- **Illustrates** each scene with AI images (Pollinations), real stock video (Pexels), or AI video
+  clips from [Wan2GP](https://github.com/deepbeepmeep/Wan2GP) on a free Colab GPU.
 - **Lets you repair** any scene before rendering: edit the narration, regenerate a voice or visual,
   lock the good ones, and watch a live preview of the final video.
 - **Renders** 1080p Shorts (9:16) and long-form videos (16:9) on GitHub Actions.

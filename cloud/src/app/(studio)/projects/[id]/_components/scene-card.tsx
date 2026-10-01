@@ -1,22 +1,29 @@
 "use client";
 
-import { Check, CircleAlert, Clapperboard, ImageIcon, LoaderCircle, Lock, Mic, Save, Search, Sparkles } from "lucide-react";
+import { Check, CircleAlert, Clapperboard, Film, ImageIcon, LoaderCircle, Lock, Mic, Save, Search, Sparkles, X } from "lucide-react";
 import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Switch, Textarea } from "@/components/ui/form-controls";
 import type { ActionResult } from "@/lib/action";
 import { cn } from "@/lib/utils";
-import { regenerateAudioAction, regenerateVisualAction, saveNarrationAction, setSceneLockedAction } from "../../actions";
+import { cancelAiClipAction, queueAiClipAction, regenerateAudioAction, regenerateVisualAction, saveNarrationAction, setSceneLockedAction } from "../../actions";
 import type { StudioScene } from "./types";
 
-type Busy = "save" | "voice" | "visual" | "lock" | null;
+type Busy = "save" | "voice" | "visual" | "clip" | "lock" | null;
+type Source = "POLLINATIONS" | "PEXELS" | "WAN2GP";
+
+function initialSource(scene: StudioScene): Source {
+  if (scene.aiClipStatus || scene.visualSource === "WAN2GP") return "WAN2GP";
+  return scene.visualSource === "PEXELS" ? "PEXELS" : "POLLINATIONS";
+}
 
 export function SceneCard({ projectId, scene, format, editable }: { projectId: string; scene: StudioScene; format: "SHORT" | "LONG_FORM"; editable: boolean }) {
   const [text, setText] = useState(scene.narrationText);
   const [prompt, setPrompt] = useState(scene.visualPrompt ?? "");
   const [query, setQuery] = useState(scene.stockQuery ?? "");
-  const [source, setSource] = useState<"POLLINATIONS" | "PEXELS">(scene.visualSource === "PEXELS" ? "PEXELS" : "POLLINATIONS");
+  const [source, setSource] = useState<Source>(initialSource(scene));
+  const [clipPrompt, setClipPrompt] = useState(scene.aiClipPrompt ?? scene.visualPrompt ?? "");
   const [busy, setBusy] = useState<Busy>(null);
   const [, startTransition] = useTransition();
   // The switch flips immediately and falls back to the server value if the action fails.
@@ -115,6 +122,7 @@ export function SceneCard({ projectId, scene, format, editable }: { projectId: s
                   [
                     ["POLLINATIONS", "AI image"],
                     ["PEXELS", "Stock B-roll"],
+                    ["WAN2GP", "AI video"],
                   ] as const
                 ).map(([value, text]) => (
                   <button
@@ -142,6 +150,27 @@ export function SceneCard({ projectId, scene, format, editable }: { projectId: s
                   {spinner("visual", <Sparkles />)} Regenerate image
                 </Button>
               </div>
+            ) : source === "WAN2GP" ? (
+              <div className="grid gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                  <Textarea value={clipPrompt} onChange={(e) => setClipPrompt(e.target.value)} rows={2} disabled={!editable || locked} placeholder="Describe the motion: subject, action, camera" aria-label={`${label} AI video prompt`} className="min-h-0" />
+                  {scene.aiClipStatus === "QUEUED" || scene.aiClipStatus === "RUNNING" ? (
+                    <Button size="sm" variant="outline" disabled={disabled} onClick={() => run("clip", () => cancelAiClipAction(projectId, scene.id), `${label}: AI video request cancelled`)}>
+                      {spinner("clip", <X />)} Cancel
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={disabled}
+                      onClick={() => run("clip", () => queueAiClipAction(projectId, scene.id, clipPrompt), `${label}: AI video queued for the Wan2GP worker`)}
+                    >
+                      {spinner("clip", <Film />)} {scene.visualSource === "WAN2GP" ? "Generate another" : "Queue AI video"}
+                    </Button>
+                  )}
+                </div>
+                <ClipStatus scene={scene} />
+              </div>
             ) : (
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <Input value={query} onChange={(e) => setQuery(e.target.value)} disabled={!editable || locked} placeholder="e.g. rainy city street" aria-label={`${label} stock search`} />
@@ -159,6 +188,25 @@ export function SceneCard({ projectId, scene, format, editable }: { projectId: s
         </div>
       </div>
     </article>
+  );
+}
+
+function ClipStatus({ scene }: { scene: StudioScene }) {
+  const text =
+    scene.aiClipStatus === "QUEUED"
+      ? "Waiting for the Wan2GP worker. Start the Colab notebook if it isn't running."
+      : scene.aiClipStatus === "RUNNING"
+        ? "Generating on the GPU worker (a few minutes per clip). The current visual stays until it's done."
+        : scene.aiClipStatus === "FAILED"
+          ? `Wan2GP failed: ${scene.aiClipError ?? "unknown error"}`
+          : scene.visualSource === "WAN2GP"
+            ? "Using a Wan2GP clip. Short clips loop to cover the narration."
+            : "Clips are made by Wan2GP on a GPU worker (see the Colab notebook). The current visual is used until the clip arrives.";
+  return (
+    <p className={cn("flex items-start gap-1.5 text-xs", scene.aiClipStatus === "FAILED" ? "text-destructive" : "text-muted-foreground")}>
+      {scene.aiClipStatus === "QUEUED" || scene.aiClipStatus === "RUNNING" ? <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin" /> : null}
+      {text}
+    </p>
   );
 }
 
