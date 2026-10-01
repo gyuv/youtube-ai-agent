@@ -405,6 +405,10 @@ yourself in YouTube Studio if you want it public.
 - **Check visibility** on a published video asks YouTube for its current visibility (after your
   audit is approved, for example).
 - **Channels**: change the schedule, style or voice at any time. New videos use the new settings.
+- **Publishing to YouTube**: a video page's **YouTube** box has a **Publish to YouTube** button for
+  rendered videos (no re-render needed) and an **Auto-publish to YouTube** switch (the same as the
+  channel setting). With it on, new renders upload by themselves and the autopilot run (every 3
+  hours) publishes any rendered video still waiting, retrying a failed one every 6 hours.
 - **ElevenLabs voices (optional)**: add `ELEVENLABS_API_KEY` in Vercel (ElevenLabs → Profile →
   API keys) and redeploy. Then in *Channels → Voice* pick **Gigi** or **Domi (ElevenLabs)**, or type
   `elevenlabs:` followed by any voice ID from your ElevenLabs library. Captions stay word-timed. The

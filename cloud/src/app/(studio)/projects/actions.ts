@@ -14,7 +14,8 @@ import {
   updateSceneNarration,
   type SceneFillResult,
 } from "@/services/pipeline";
-import { createProject, deleteProject, setSceneLocked, updateProjectMetadata } from "@/services/projects";
+import { createProject, deleteProject, setChannelAutoPublish, setSceneLocked, updateProjectMetadata } from "@/services/projects";
+import { publishRenderedProject } from "@/services/publish";
 import { cancelSceneClip, queueSceneClip } from "@/services/wan2gp";
 import { checkYouTubeVisibility } from "@/services/youtube";
 
@@ -177,5 +178,25 @@ export async function cancelAiClipAction(projectId: string, sceneId: string): Pr
     return null;
   });
   refresh(projectId);
+  return result;
+}
+
+// ── Publishing ─────────────────────────────────────────────────
+
+export async function publishProjectAction(projectId: string): Promise<ActionResult<{ youtubeVideoId: string; locked: boolean }>> {
+  await requireOperator();
+  const result = await toActionResult(() => publishRenderedProject(Id.parse(projectId)));
+  refresh(projectId);
+  return result;
+}
+
+export async function setAutoPublishAction(projectId: string, channelId: string, enabled: boolean): Promise<ActionResult> {
+  await requireOperator();
+  const result = await toActionResult(async () => {
+    await setChannelAutoPublish(Id.parse(channelId), z.boolean().parse(enabled));
+    return null;
+  });
+  refresh(projectId);
+  revalidatePath("/channels");
   return result;
 }

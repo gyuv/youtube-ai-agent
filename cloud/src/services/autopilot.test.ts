@@ -8,11 +8,13 @@ const db = vi.hoisted(() => ({
 const pipeline = vi.hoisted(() => ({ dispatchCloudRender: vi.fn(), fillSceneAssets: vi.fn(), generateProjectScript: vi.fn() }));
 const planner = vi.hoisted(() => ({ proposeTopic: vi.fn() }));
 const youtube = vi.hoisted(() => ({ checkYouTubeVisibility: vi.fn() }));
+const publish = vi.hoisted(() => ({ findVideoToAutoPublish: vi.fn(), publishRenderedProject: vi.fn() }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("./pipeline", async (importActual) => ({ ...(await importActual<typeof import("./pipeline")>()), ...pipeline }));
 vi.mock("./topicPlanner", () => planner);
 vi.mock("./youtube", () => youtube);
+vi.mock("./publish", () => publish);
 
 import { MAX_AUTOPILOT_FAILURES, autopilotTick } from "./autopilot";
 
@@ -69,10 +71,29 @@ function projectsQuery({
 }
 
 beforeEach(() => {
-  for (const group of [...Object.values(db), pipeline, planner, youtube]) for (const fn of Object.values(group)) fn.mockReset();
+  for (const group of [...Object.values(db), pipeline, planner, youtube, publish]) for (const fn of Object.values(group)) fn.mockReset();
   db.channel.findMany.mockResolvedValue([CHANNEL]);
   db.videoProject.create.mockImplementation(async ({ data }) => ({ id: "new1", ...data }));
   projectsQuery({});
+  publish.findVideoToAutoPublish.mockResolvedValue(null);
+});
+
+describe("auto-publish catch-up", () => {
+  it("publishes a rendered video waiting on an auto-publish channel before anything else", async () => {
+    publish.findVideoToAutoPublish.mockResolvedValue({ id: "p9", channelId: "c1", title: "Tax tips", topic: "t" });
+    publish.publishRenderedProject.mockResolvedValue({ youtubeVideoId: "abc123def45", locked: false });
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "published", projectId: "p9", more: true });
+    expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
+  });
+
+  it("logs a failed publish and moves on", async () => {
+    publish.findVideoToAutoPublish.mockResolvedValue({ id: "p9", channelId: "c1", title: null, topic: "Tax tips" });
+    publish.publishRenderedProject.mockRejectedValue(new Error("quota exceeded"));
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "error", more: true });
+    expect(result.message).toContain("quota exceeded");
+  });
 });
 
 describe("autopilotTick", () => {

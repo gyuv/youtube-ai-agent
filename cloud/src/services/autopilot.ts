@@ -3,6 +3,7 @@ import { ProjectStatus, VisualSource } from "@/generated/prisma/enums";
 import { errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets } from "./pipeline";
+import { findVideoToAutoPublish, publishRenderedProject } from "./publish";
 import { firstFreeSlot, formatSlot, isValidCron } from "./schedule";
 import { proposeTopic } from "./topicPlanner";
 import { checkYouTubeVisibility } from "./youtube";
@@ -31,7 +32,7 @@ export const PLANNING_PAUSE_MS = 12 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const VERIFY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type TickAction = "dispatched" | "filled" | "scripted" | "verified" | "planned" | "error" | "idle";
+export type TickAction = "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "error" | "idle";
 
 export interface TickResult {
   action: TickAction;
@@ -221,6 +222,24 @@ async function nextTopic(channel: AutopilotChannel): Promise<{ topic: string; so
 
 export async function autopilotTick(now: Date = new Date()): Promise<TickResult> {
   const swept = await sweepStaleRenders(now);
+
+  // Rendered videos waiting for YouTube go first: on auto-publish channels they shouldn't sit idle,
+  // whether or not the channel also runs the autopilot.
+  const toPublish = await findVideoToAutoPublish(now);
+  if (toPublish) {
+    const ids = { projectId: toPublish.id, channelId: toPublish.channelId };
+    const name = `"${toPublish.title ?? toPublish.topic}"`;
+    try {
+      const { youtubeVideoId, locked } = await publishRenderedProject(toPublish.id, now);
+      const message = `${name} published to YouTube (https://youtu.be/${youtubeVideoId})${locked ? ", but YouTube kept it private" : ""}.`;
+      await log(locked ? "error" : "info", "published", message, ids);
+      return { action: "published", message, more: true, swept, ...ids };
+    } catch (error) {
+      const message = `${name} could not be published: ${errorMessage(error)}`;
+      await log("error", "published", message, ids);
+      return { action: "error", message, more: true, swept, ...ids };
+    }
+  }
 
   const channels = await prisma.channel.findMany({ where: { autopilot: true, isActive: true } });
   if (channels.length === 0) return { action: "idle", message: "Autopilot is off on every channel.", more: false, swept };

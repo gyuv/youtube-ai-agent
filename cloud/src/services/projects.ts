@@ -103,3 +103,13 @@ export async function getStudioProject(projectId: string) {
     include: { channel: true, scenes: { orderBy: { sceneIndex: "asc" } } },
   });
 }
+
+/** The channel's auto-publish switch, also offered on each video's page. */
+export async function setChannelAutoPublish(channelId: string, enabled: boolean) {
+  const channel = await prisma.channel.findUnique({ where: { id: channelId }, select: { oauthRefreshTokenEnc: true, name: true } });
+  if (!channel) throw new PipelineError("NOT_FOUND", `Channel ${channelId} not found.`);
+  if (enabled && !channel.oauthRefreshTokenEnc) {
+    throw new PipelineError("CONFLICT", `Connect "${channel.name}" to YouTube first (Channels → Connect YouTube).`);
+  }
+  return prisma.channel.update({ where: { id: channelId }, data: { autoPublish: enabled } });
+}
