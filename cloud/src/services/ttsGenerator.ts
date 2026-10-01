@@ -1,12 +1,14 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import type { Readable } from "node:stream";
 import { PipelineError, errorMessage } from "@/lib/errors";
-import { DEFAULT_VOICE, isValidVoice } from "@/lib/voices";
+import { DEFAULT_VOICE, ELEVENLABS_PREFIX, elevenLabsVoiceId, isValidVoice } from "@/lib/voices";
+import { synthesizeElevenLabs } from "./elevenLabsTts";
 
 /**
  * Free neural voiceover through Microsoft Edge's Read Aloud service (the engine behind the
  * Python `edge-tts` CLI), via the pure-Node `msedge-tts` port so it runs inside a Vercel
  * function or a GitHub Actions runner with no Python and no API key.
+ * Voices named "elevenlabs:<voiceId>" go to ElevenLabs instead (see elevenLabsTts.ts).
  */
 
 export { DEFAULT_VOICE, EDGE_VOICES, isValidVoice } from "@/lib/voices";
@@ -127,6 +129,11 @@ export async function synthesizeSpeech(
       "CONFLICT",
       `Narration is ${narration.length} characters; split the scene (max ${MAX_NARRATION_CHARS}).`,
     );
+  }
+  if (voice.startsWith(ELEVENLABS_PREFIX)) {
+    const voiceId = elevenLabsVoiceId(voice);
+    if (!voiceId) throw new PipelineError("CONFLICT", `"${voice}" is not a valid ElevenLabs voice (use elevenlabs:<voice ID>).`);
+    return synthesizeElevenLabs(narration, voiceId, voice, options.timeoutMs);
   }
   if (!isValidVoice(voice)) throw new PipelineError("CONFLICT", `"${voice}" is not a valid edge-tts voice name.`);
   if (!RATE_PATTERN.test(rate)) throw new PipelineError("CONFLICT", `Rate must look like "+10%", got "${rate}".`);

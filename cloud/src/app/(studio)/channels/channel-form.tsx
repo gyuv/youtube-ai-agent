@@ -9,7 +9,7 @@ import { FieldHint, Input, Label, Select, Switch, Textarea } from "@/components/
 import type { Channel } from "@/generated/prisma/client";
 import { useClientValue } from "@/lib/use-client-value";
 import { cn } from "@/lib/utils";
-import { DEFAULT_VOICE, EDGE_VOICES } from "@/lib/voices";
+import { DEFAULT_VOICE, VOICE_OPTIONS } from "@/lib/voices";
 import { formatSlot, isValidCron, isValidTimeZone, nextPostingTimes } from "@/services/schedule";
 import { saveChannelAction, type ChannelFormState } from "./actions";
 
@@ -127,10 +127,10 @@ export function ChannelForm({ channelId, initial, youtubeConnected }: { channelI
           </div>
         </CardHeader>
         <CardContent className="grid gap-5 sm:grid-cols-3">
-          <Field id="defaultVoice" label="Voice" error={errors.defaultVoice} hint="Pick one or type any edge-tts voice">
+          <Field id="defaultVoice" label="Voice" error={errors.defaultVoice} hint="Pick one, or type any edge-tts voice or elevenlabs:<voice ID>">
             <Input id="defaultVoice" name="defaultVoice" list="edge-voices" defaultValue={initial?.defaultVoice ?? DEFAULT_VOICE} required aria-invalid={!!errors.defaultVoice} />
             <datalist id="edge-voices">
-              {EDGE_VOICES.map((v) => (
+              {VOICE_OPTIONS.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.label}
                 </option>

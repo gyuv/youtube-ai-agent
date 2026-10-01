@@ -405,6 +405,10 @@ yourself in YouTube Studio if you want it public.
 - **Check visibility** on a published video asks YouTube for its current visibility (after your
   audit is approved, for example).
 - **Channels**: change the schedule, style or voice at any time. New videos use the new settings.
+- **ElevenLabs voices (optional)**: add `ELEVENLABS_API_KEY` in Vercel (ElevenLabs → Profile →
+  API keys) and redeploy. Then in *Channels → Voice* pick **Gigi** or **Domi (ElevenLabs)**, or type
+  `elevenlabs:` followed by any voice ID from your ElevenLabs library. Captions stay word-timed. The
+  free ElevenLabs plan covers about 10,000 characters a month, roughly 10 Shorts.
 - **AI video scenes (optional)**: see [AI video clips with Wan2GP](#ai-video-clips-with-wan2gp-optional) below.
 - A typical week with review mode on: open the dashboard, review each *Ready for your review* video,
   fix anything, click **Dispatch Cloud Render**, and it publishes at its slot.
@@ -537,6 +541,7 @@ help with it.
 | `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | no | override the Gemini models |
 | `PEXELS_API_KEY` | for stock video | Pexels key |
 | `POLLINATIONS_TOKEN` | no | raises the AI image rate limit |
+| `ELEVENLABS_API_KEY` | for ElevenLabs voices | ElevenLabs API key |
 | `WAN2GP_WORKER_SECRET` | for AI video | random; also a Colab secret for the Wan2GP worker |
 | `GITHUB_DISPATCH_TOKEN` | yes | GitHub fine-grained token |
 | `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME` | yes | `gyuv`, `youtube-ai-agent` |
