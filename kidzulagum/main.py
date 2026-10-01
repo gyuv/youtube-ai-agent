@@ -50,6 +50,8 @@ VOICE = os.environ.get("KZ_VOICE", "en-US-AnaNeural")
 VOICE_RATE = os.environ.get("KZ_VOICE_RATE", "-10%")
 
 GEMINI_MODELS = [m for m in (os.environ.get("GEMINI_MODEL", "gemini-3.7-flash"), os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")) if m]
+# Image providers, tried in order. Pollinations is free, keyless and has no monthly cap.
+IMAGE_PROVIDERS = [p.strip() for p in os.environ.get("KZ_IMAGE_PROVIDERS", "pollinations,cloudflare,huggingface").split(",") if p.strip()]
 HF_MODELS = [m.strip() for m in os.environ.get("HF_IMAGE_MODELS", "stabilityai/stable-diffusion-xl-base-1.0,black-forest-labs/FLUX.1-schnell").split(",") if m.strip()]
 
 IMAGE_SUFFIX = (
@@ -60,6 +62,11 @@ HOSTS = (
     "Milo, a fluffy white Persian cat with big round blue eyes and a tiny red bow tie, "
     "and Coco, a playful golden-and-white Shih Tzu puppy with a little top-knot and a pink bow"
 )
+# Added to every image prompt so the two hosts look the same from scene to scene.
+HOST_LOOK = (
+    "Milo the fluffy white Persian cat with big round blue eyes and a small red bow tie, "
+    "and Coco the golden-and-white Shih Tzu puppy with a top-knot tied with a pink bow"
+)
 
 PRIVACY = os.environ.get("KZ_PRIVACY", "public")  # public | unlisted | private
 CATEGORY_EDUCATION = "27"
@@ -69,7 +76,7 @@ def log(message: str) -> None:
     print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
 
 
-def require(name: str) -> str:
+def require(name: str) -> str:  # only for the YouTube upload, which has no keyless alternative
     value = os.environ.get(name, "").strip()
     if not value:
         sys.exit(f"Missing environment variable {name}. Add it as a GitHub repository secret.")
@@ -145,35 +152,107 @@ Rules:
 Return JSON only."""
 
 
-def generate_script(topic: str) -> dict:
+def parse_script(text: str) -> dict:
+    """Accept bare JSON or JSON wrapped in a ```json fence; keep only usable scenes."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+    script = json.loads(text[text.index("{") : text.rindex("}") + 1])
+    scenes = [
+        {"image_prompt": str(s["image_prompt"]).strip(), "tts_text": str(s["tts_text"]).strip()}
+        for s in script.get("scenes", [])
+        if isinstance(s, dict) and str(s.get("image_prompt", "")).strip() and str(s.get("tts_text", "")).strip()
+    ]
+    if len(scenes) < 8:
+        raise ValueError(f"only {len(scenes)} usable scenes")
+    if not str(script.get("title", "")).strip():
+        raise ValueError("no title")
+    script["scenes"] = scenes
+    script["description"] = str(script.get("description", "")).strip()
+    script["tags"] = [str(t) for t in script.get("tags", []) if str(t).strip()]
+    return script
+
+
+def _gemini(prompt: str) -> str:
     from google import genai
     from google.genai import types
 
-    client = genai.Client(api_key=require("GEMINI_API_KEY"))
-    errors = []
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    last: Exception | None = None
     for model in GEMINI_MODELS:
-        for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=SCRIPT_SCHEMA, temperature=0.9),
+            )
+            return response.text
+        except Exception as error:  # quota or overload on this model: try the next one
+            last = error
+            log(f"  Gemini {model}: {str(error)[:140]}")
+    raise RuntimeError(f"Gemini failed: {last}")
+
+
+def _openai_compatible(url: str, model: str, prompt: str, headers: dict | None = None) -> str:
+    res = requests.post(
+        url,
+        headers={"Content-Type": "application/json", **(headers or {})},
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a children's TV scriptwriter. Reply with one JSON object only."},
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.9,
+        },
+        timeout=180,
+    )
+    res.raise_for_status()
+    return res.json()["choices"][0]["message"]["content"]
+
+
+def _groq(prompt: str) -> str:
+    return _openai_compatible(
+        "https://api.groq.com/openai/v1/chat/completions",
+        os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        prompt,
+        {"Authorization": f"Bearer {os.environ['GROQ_API_KEY']}"},
+    )
+
+
+def _pollinations_text(prompt: str) -> str:
+    token = os.environ.get("POLLINATIONS_TOKEN", "").strip()
+    return _openai_compatible(
+        "https://text.pollinations.ai/openai",
+        os.environ.get("POLLINATIONS_TEXT_MODEL", "openai"),
+        prompt,
+        {"Authorization": f"Bearer {token}"} if token else None,
+    )
+
+
+def generate_script(topic: str) -> dict:
+    """Gemini first, then Groq, then Pollinations (keyless), so a quota never skips an episode."""
+    prompt = build_script_prompt(topic) + "\nJSON keys: title, description, tags (array), scenes (array of {image_prompt, tts_text})."
+    providers = []
+    if os.environ.get("GEMINI_API_KEY", "").strip():
+        providers.append(("Gemini", _gemini))
+    if os.environ.get("GROQ_API_KEY", "").strip():
+        providers.append(("Groq", _groq))
+    providers.append(("Pollinations", _pollinations_text))
+
+    errors = []
+    for name, call in providers:
+        for attempt in range(2):
             try:
-                response = client.models.generate_content(
-                    model=model,
-                    contents=build_script_prompt(topic),
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=SCRIPT_SCHEMA,
-                        temperature=0.9,
-                    ),
-                )
-                script = json.loads(response.text)
-                scenes = [s for s in script.get("scenes", []) if s.get("image_prompt", "").strip() and s.get("tts_text", "").strip()]
-                if len(scenes) < 8:
-                    raise ValueError(f"only {len(scenes)} usable scenes")
-                script["scenes"] = scenes
-                log(f"Script ready from {model}: {len(scenes)} scenes, '{script['title']}'")
+                script = parse_script(call(prompt))
+                log(f"Script ready from {name}: {len(script['scenes'])} scenes, '{script['title']}'")
                 return script
-            except Exception as error:  # quota, overload or bad JSON: retry, then fall back to the next model
-                errors.append(f"{model} #{attempt + 1}: {error}")
+            except Exception as error:
+                errors.append(f"{name} #{attempt + 1}: {str(error)[:200]}")
+                log(f"  {errors[-1]}")
                 time.sleep(5 * (attempt + 1))
-    sys.exit("Gemini could not write the script:\n" + "\n".join(errors))
+    sys.exit("No script provider worked:\n" + "\n".join(errors))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -195,45 +274,80 @@ def fit_16x9(image: Image.Image) -> Image.Image:
     return image.resize(VIDEO_SIZE, Image.LANCZOS)
 
 
-def huggingface_image(prompt: str) -> Image.Image:
+def huggingface_image(prompt: str, seed: int) -> Image.Image:
     from huggingface_hub import InferenceClient
 
-    client = InferenceClient(token=require("HF_TOKEN"), timeout=180)
+    client = InferenceClient(token=os.environ["HF_TOKEN"], timeout=180)
     last_error: Exception | None = None
     for model in HF_MODELS:
-        for attempt in range(3):
+        for attempt in range(2):
             try:
-                return client.text_to_image(prompt, model=model, width=1344, height=768,
+                return client.text_to_image(prompt, model=model, width=1344, height=768, seed=seed,
                                             negative_prompt="text, watermark, scary, dark, blurry, deformed, extra limbs")
             except Exception as error:  # cold model (503), rate limit (429) or out of free credits (402)
                 last_error = error
-                log(f"  Hugging Face {model} attempt {attempt + 1} failed: {str(error)[:160]}")
                 if "402" in str(error):
-                    break  # free monthly credits used up: retrying this provider won't help
+                    raise RuntimeError("Hugging Face free credits used up") from error
                 time.sleep(15 * (attempt + 1))
     raise RuntimeError(f"Hugging Face failed: {last_error}")
 
 
-def pollinations_image(prompt: str) -> Image.Image:
-    """Keyless free fallback so a busy Hugging Face never stops the daily episode."""
+def pollinations_image(prompt: str, seed: int) -> Image.Image:
+    """Free and keyless (a free token from auth.pollinations.ai lifts the rate limit)."""
     url = "https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt[:900])
-    params = {"width": 1344, "height": 768, "model": "flux", "nologo": "true", "safe": "true", "seed": random.randint(1, 2**31 - 1)}
+    params = {"width": 1344, "height": 768, "model": os.environ.get("POLLINATIONS_MODEL", "flux"),
+              "nologo": "true", "safe": "true", "enhance": "false", "seed": seed}
+    token = os.environ.get("POLLINATIONS_TOKEN", "").strip()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    status = None
     for attempt in range(4):
-        res = requests.get(url, params=params, timeout=180)
-        if res.ok and res.headers.get("content-type", "").startswith("image/"):
-            return Image.open(io.BytesIO(res.content))
-        time.sleep(10 * (attempt + 1))
-    raise RuntimeError(f"Pollinations failed ({res.status_code})")
+        try:
+            res = requests.get(url, params=params, headers=headers, timeout=180)
+            status = res.status_code
+            if res.ok and res.headers.get("content-type", "").startswith("image/") and len(res.content) > 5000:
+                return Image.open(io.BytesIO(res.content))
+        except requests.RequestException as error:
+            status = str(error)[:80]
+        time.sleep(12 * (attempt + 1))  # anonymous use is limited to one request at a time
+    raise RuntimeError(f"Pollinations failed ({status})")
 
 
-def generate_image(scene: Scene) -> None:
-    prompt = scene.image_prompt.strip().rstrip(".") + IMAGE_SUFFIX
-    try:
-        image = huggingface_image(prompt)
-    except Exception as error:
-        log(f"  Falling back to Pollinations for scene {scene.index}: {str(error)[:120]}")
-        image = pollinations_image(prompt)
-    fit_16x9(image).save(scene.image, "JPEG", quality=92)
+def cloudflare_image(prompt: str, seed: int) -> Image.Image:
+    """Cloudflare Workers AI: free daily allowance (about 10,000 neurons, plenty for ~20 images)."""
+    import base64
+
+    account = os.environ["CLOUDFLARE_ACCOUNT_ID"]
+    res = requests.post(
+        f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/black-forest-labs/flux-1-schnell",
+        headers={"Authorization": f"Bearer {os.environ['CLOUDFLARE_API_TOKEN']}"},
+        json={"prompt": prompt[:2048], "steps": 8, "seed": seed},
+        timeout=120,
+    )
+    res.raise_for_status()
+    return Image.open(io.BytesIO(base64.b64decode(res.json()["result"]["image"])))
+
+
+def available_image_providers():
+    makers = {
+        "pollinations": (pollinations_image, True),
+        "cloudflare": (cloudflare_image, bool(os.environ.get("CLOUDFLARE_ACCOUNT_ID") and os.environ.get("CLOUDFLARE_API_TOKEN"))),
+        "huggingface": (huggingface_image, bool(os.environ.get("HF_TOKEN", "").strip())),
+    }
+    return [(name, makers[name][0]) for name in IMAGE_PROVIDERS if name in makers and makers[name][1]]
+
+
+def generate_image(scene: Scene, seed: int) -> None:
+    prompt = f"{scene.image_prompt.strip().rstrip('.')}. The hosts: {HOST_LOOK}{IMAGE_SUFFIX}"
+    errors = []
+    for name, make in available_image_providers():
+        try:
+            fit_16x9(make(prompt, seed)).save(scene.image, "JPEG", quality=92)
+            log(f"  image from {name}")
+            return
+        except Exception as error:
+            errors.append(f"{name}: {str(error)[:120]}")
+            log(f"  {errors[-1]}")
+    raise RuntimeError("No image provider worked: " + " | ".join(errors))
 
 
 async def _speak(text: str, path: Path) -> None:
@@ -253,9 +367,10 @@ def generate_audio(scene: Scene) -> None:
 
 
 def generate_assets(scenes: list[Scene]) -> None:
+    seed = random.randint(1, 2**31 - 1)  # one seed per episode keeps the hosts' look steadier
     for scene in scenes:
         log(f"Scene {scene.index}: image + voice")
-        generate_image(scene)
+        generate_image(scene, seed)
         generate_audio(scene)
 
 
@@ -285,9 +400,53 @@ def ken_burns(image_path: Path, duration: float):
     return VideoClip(frame, duration=duration)
 
 
-def pick_music() -> Path | None:
+def synth_music(path: Path, seconds: float = 32.0, rate: int = 44100) -> Path:
+    """A gentle, original music-box loop (so there is always copyright-free music)."""
+    import wave
+
+    bpm = 96
+    beat = 60 / bpm
+    # I - V - vi - IV in C major, as arpeggios (MIDI notes).
+    chords = [[60, 64, 67, 72], [55, 59, 62, 67], [57, 60, 64, 69], [53, 57, 60, 65]]
+    melody = [72, 74, 76, 79, 76, 74, 72, 67, 69, 72, 74, 72, 69, 67, 65, 67]
+    t_total = int(seconds * rate)
+    out = np.zeros(t_total)
+
+    def note(midi: int, start: float, length: float, volume: float) -> None:
+        freq = 440 * 2 ** ((midi - 69) / 12)
+        n = int(length * rate)
+        i0 = int(start * rate)
+        if i0 >= t_total:
+            return
+        n = min(n, t_total - i0)
+        t = np.arange(n) / rate
+        envelope = np.exp(-3.5 * t) * np.minimum(1, t * 200)
+        tone = np.sin(2 * np.pi * freq * t) + 0.3 * np.sin(4 * np.pi * freq * t)
+        out[i0 : i0 + n] += volume * envelope * tone
+
+    step = 0
+    time_pos = 0.0
+    while time_pos < seconds:
+        chord = chords[(step // 8) % 4]
+        note(chord[step % 4], time_pos, beat * 2, 0.18)
+        if step % 2 == 0:
+            note(melody[(step // 2) % len(melody)], time_pos, beat * 1.5, 0.22)
+        step += 1
+        time_pos += beat / 2
+
+    out = out / (np.max(np.abs(out)) or 1) * 0.8
+    pcm = (out * 32767).astype("<i2")
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(pcm.tobytes())
+    return path
+
+
+def pick_music() -> Path:
     tracks = sorted(p for p in MUSIC_DIR.glob("*") if p.suffix.lower() in {".mp3", ".wav", ".m4a", ".ogg"})
-    return random.choice(tracks) if tracks else None
+    return random.choice(tracks) if tracks else synth_music(WORK / "music_box.wav")
 
 
 def render_video(scenes: list[Scene], output: Path) -> Path:
@@ -303,17 +462,14 @@ def render_video(scenes: list[Scene], output: Path) -> Path:
 
     video = concatenate_videoclips(clips, method="chain")
     track = pick_music()
-    if track:
-        music = (
-            AudioFileClip(str(track))
-            .with_effects([AudioLoop(duration=video.duration)])
-            .with_volume_scaled(MUSIC_VOLUME)
-            .with_effects([AudioFadeIn(1.5), AudioFadeOut(3)])
-        )
-        video = video.with_audio(CompositeAudioClip([video.audio, music]))
-        log(f"Background music: {track.name} at {int(MUSIC_VOLUME * 100)}%")
-    else:
-        log("No music in kidzulagum/music/: rendering voice only")
+    music = (
+        AudioFileClip(str(track))
+        .with_effects([AudioLoop(duration=video.duration)])
+        .with_volume_scaled(MUSIC_VOLUME)
+        .with_effects([AudioFadeIn(1.5), AudioFadeOut(3)])
+    )
+    video = video.with_audio(CompositeAudioClip([video.audio, music]))
+    log(f"Background music: {track.name} at {int(MUSIC_VOLUME * 100)}%")
 
     video.write_videofile(
         str(output), fps=FPS, codec="libx264", audio_codec="aac", preset="medium",

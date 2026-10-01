@@ -1,6 +1,6 @@
 # Kidzulagum pipeline: everything here is free and runs on a GitHub Actions Ubuntu runner.
 google-genai>=1.40,<3            # Gemini (script + metadata)
-huggingface_hub>=0.30,<3         # Hugging Face Inference API (images)
+huggingface_hub>=0.30,<3         # Hugging Face images (optional fallback)
 edge-tts>=7.2,<8                 # Microsoft Edge neural voices
 moviepy==2.2.1                   # rendering (uses the system FFmpeg)
 numpy>=1.26,<3
