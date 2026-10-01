@@ -417,17 +417,27 @@ def offline_card(scene: Scene) -> Image.Image:
     return card
 
 
+# A provider that fails twice in an episode is skipped for the rest of it, so an outage costs
+# minutes, not ~2 minutes of retries on every scene.
+_FAILURES: dict[str, int] = {}
+MAX_PROVIDER_FAILURES = 2
+
+
 def generate_image(scene: Scene, seed: int) -> None:
     prompt = f"{scene.image_prompt.strip().rstrip('.')}. The hosts: {HOST_LOOK}{IMAGE_SUFFIX}"
     errors = []
     for name, make in available_image_providers():
+        if _FAILURES.get(name, 0) >= MAX_PROVIDER_FAILURES:
+            continue
         try:
             fit_16x9(make(prompt, seed)).save(scene.image, "JPEG", quality=92)
+            _FAILURES[name] = 0
             log(f"  image from {name}")
             return
         except Exception as error:
+            _FAILURES[name] = _FAILURES.get(name, 0) + 1
             errors.append(f"{name}: {str(error)[:120]}")
-            log(f"  {errors[-1]}")
+            log(f"  {errors[-1]}" + (" (skipping it for the rest of this episode)" if _FAILURES[name] >= MAX_PROVIDER_FAILURES else ""))
     log(f"  every image service failed ({' | '.join(errors)[:200]}); using an offline card")
     offline_card(scene).save(scene.image, "JPEG", quality=92)
 
