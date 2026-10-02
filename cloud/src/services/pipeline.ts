@@ -300,6 +300,8 @@ export interface SceneFillResult {
   skipped: "locked" | null;
   generated: Array<"audio" | "visual">;
   errors: string[];
+  /** Every error came from an outside service (outage, quota, payment wall), so retrying later may work. */
+  providerOnly?: boolean;
 }
 
 /**
@@ -311,13 +313,18 @@ export async function fillSceneAssets(sceneId: string, options: { visualSource?:
   if (!scene) throw new PipelineError("NOT_FOUND", `Scene ${sceneId} not found.`);
   const result: SceneFillResult = { sceneIndex: scene.sceneIndex, skipped: null, generated: [], errors: [] };
   if (scene.locked) return { ...result, skipped: "locked" };
+  let providerOnly = true;
+  const fail = (what: string, error: unknown) => {
+    result.errors.push(`${what}: ${errorMessage(error)}`);
+    if (!(error instanceof PipelineError && error.code === "PROVIDER")) providerOnly = false;
+  };
 
   if (!scene.voiceAudioUrl) {
     try {
       await regenerateSceneAudio(sceneId);
       result.generated.push("audio");
     } catch (error) {
-      result.errors.push(`Voice: ${errorMessage(error)}`);
+      fail("Voice", error);
     }
   }
   if (!scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene)) {
@@ -325,9 +332,10 @@ export async function fillSceneAssets(sceneId: string, options: { visualSource?:
       await regenerateSceneVisual(sceneId, { source: options.visualSource });
       result.generated.push("visual");
     } catch (error) {
-      result.errors.push(`Visual: ${errorMessage(error)}`);
+      fail("Visual", error);
     }
   }
+  if (result.errors.length) result.providerOnly = providerOnly;
   return result;
 }
 

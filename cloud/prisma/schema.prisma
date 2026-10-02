@@ -167,6 +167,7 @@ model VideoProject {
   // Created and advanced by the autopilot; it never touches operator-made projects.
   autopilot         Boolean @default(false)
   autopilotFailures Int     @default(0) // autopilot gives up on the project after 3
+  autopilotRetryAt  DateTime? // an outside service refused; autopilot leaves the project alone until then
 
   scenes Scene[]
 

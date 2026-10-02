@@ -25,17 +25,21 @@ import { SCHEDULE_GRACE_MS } from "./youtubeVisibility";
  *
  * Work is taken in deadline order (earliest slot first) and finished before new work starts.
  * The autopilot only ever touches projects it created, and gives up on one after
- * MAX_AUTOPILOT_FAILURES so a broken project can't burn free quotas forever.
+ * MAX_AUTOPILOT_FAILURES so a broken project can't burn free quotas forever. An outside service
+ * refusing (outage, rate limit, payment wall) is not counted: the project waits PROVIDER_RETRY_MS
+ * and is tried again, since that kind of failure clears up on its own.
  */
 
 export const MAX_AUTOPILOT_FAILURES = 3;
+/** How long a project waits after an outside service refused before autopilot tries it again. */
+export const PROVIDER_RETRY_MS = 60 * 60 * 1000;
 export const STALE_RENDER_MS = 3 * 60 * 60 * 1000;
 /** After a video gives up, stop planning new ones on that channel for a while (circuit breaker). */
 export const PLANNING_PAUSE_MS = 12 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const VERIFY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type TickAction = "packaged" | "reviewed" | "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "error" | "idle";
+export type TickAction = "packaged" | "reviewed" | "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "waiting" | "error" | "idle";
 
 export interface TickResult {
   action: TickAction;
@@ -69,6 +73,7 @@ type AutopilotChannel = Pick<
 >;
 
 type WorkProject = Pick<VideoProject, "id" | "channelId" | "status" | "topic" | "title" | "autopilotFailures" | "scheduledFor"> & {
+  autopilotRetryAt?: Date | null;
   labsAppliedAt?: Date | null;
   scenes: (Pick<Scene, "id" | "sceneIndex" | "locked" | "voiceAudioUrl" | "imageUrl" | "videoClipUrl" | "durationSeconds"> &
     Partial<Pick<Scene, "aiClipEngine" | "aiClipStatus" | "aiClipUpdatedAt">>)[];
@@ -126,6 +131,17 @@ async function sweepStaleRenders(now: Date): Promise<number> {
   return swept;
 }
 
+/** An outside service refused: wait and retry later, without using up one of the project's attempts. */
+async function postpone(project: WorkProject, step: string, error: unknown, now: Date): Promise<string> {
+  const retryAt = new Date(now.getTime() + PROVIDER_RETRY_MS);
+  await prisma.videoProject.update({ where: { id: project.id }, data: { autopilotRetryAt: retryAt, lastError: null } });
+  const summary = `${label(project)}: ${step.toLowerCase()} is waiting on an outside service (${errorMessage(error).slice(0, 200)}). Trying again after ${retryAt.toISOString().slice(11, 16)} UTC.`;
+  await log("info", "waiting", summary, { channelId: project.channelId, projectId: project.id });
+  return summary;
+}
+
+const isProviderError = (error: unknown) => error instanceof PipelineError && error.code === "PROVIDER";
+
 /** Count a failure; on the last allowed one, park the project as FAILED for an operator. */
 async function recordFailure(project: WorkProject, step: string, error: unknown): Promise<string> {
   const failures = project.autopilotFailures + 1;
@@ -148,6 +164,7 @@ const label = (p: WorkProject) => `"${p.title ?? p.topic}"`;
 
 function findWork(projects: WorkProject[], channels: Map<string, AutopilotChannel>, now: Date) {
   const complete = (p: WorkProject) => p.scenes.length > 0 && p.scenes.every(sceneHasAssets);
+  projects = projects.filter((p) => !p.autopilotRetryAt || p.autopilotRetryAt.getTime() <= now.getTime());
   for (const p of projects) {
     const channel = channels.get(p.channelId)!;
     if (awaitingPinterest(p, now)) continue;
@@ -319,6 +336,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       topic: true,
       title: true,
       autopilotFailures: true,
+      autopilotRetryAt: true,
       scheduledFor: true,
       labsAppliedAt: true,
       scenes: {
@@ -361,7 +379,10 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       }
       if (work.kind === "fill") {
         const result = await fillSceneAssets(work.sceneId, { visualSource: autopilotVisualSource(channel.autopilotVisualSource) });
-        if (result.errors.length) throw new Error(result.errors.join("; "));
+        if (result.errors.length) {
+          const message = result.errors.join("; ");
+          throw result.providerOnly ? new PipelineError("PROVIDER", message) : new Error(message);
+        }
         const message = `${label(project)}: scene ${result.sceneIndex + 1} got ${result.generated.join(" and ") || "nothing new"}.`;
         await log("info", "filled", message, ids);
         return { action: "filled", message, more: true, swept, ...ids };
@@ -372,6 +393,10 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       return { action: "scripted", message, more: true, swept, ...ids };
     } catch (error) {
       const step = work.kind === "dispatch" ? "Render dispatch" : work.kind === "fill" ? "Asset generation" : work.kind === "package" ? "Creator Labs" : "Script writing";
+      if (isProviderError(error)) {
+        const message = await postpone(project, step, error, now);
+        return { action: "waiting", message, more: true, swept, ...ids };
+      }
       const message = await recordFailure(project, step, error);
       // Other projects may still progress; failure caps keep this from looping forever.
       return { action: "error", message, more: true, swept, ...ids };
