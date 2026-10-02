@@ -1,0 +1,56 @@
+name: Migrate database
+
+# Run by hand (Actions tab -> Migrate database -> Run workflow) to apply pending Prisma
+# migrations in cloud/prisma/migrations to the production database. `prisma migrate deploy` only
+# applies migrations the database is missing, so running it again is harmless.
+#
+# Repository secret (Settings -> Secrets and variables -> Actions):
+#   DIRECT_URL   Supabase *session pooler* connection string (port 5432). The transaction pooler
+#                on :6543 does not support the locks and DDL that migrations use.
+#
+# Alternatively, the Vercel build command in cloud/README.md applies migrations on every
+# production deploy; both can be used together.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrate-database
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cloud
+    env:
+      DIRECT_URL: ${{ secrets.DIRECT_URL }}
+    steps:
+      - name: Check the secret
+        run: |
+          if [[ -z "$DIRECT_URL" ]]; then
+            echo "::error::Add the DIRECT_URL repository secret (Supabase session pooler, port 5432)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cloud/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Show pending migrations
+        run: npx prisma migrate status || true
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
