@@ -12,7 +12,7 @@ const visuals = vi.hoisted(() => ({ generatePollinationsImage: vi.fn(), findStoc
 vi.mock("./visualFetcher", async (importOriginal) => ({ ...(await importOriginal<object>()), ...visuals }));
 
 import { PipelineError } from "@/lib/errors";
-import { assetStatusFor, dispatchCloudRender, generateProjectAssets, regenerateSceneAudio, regenerateSceneVisual } from "./pipeline";
+import { assetStatusFor, dispatchCloudRender, generateProjectAssets, regenerateSceneAudio, regenerateSceneVisual, sceneNeedsFill } from "./pipeline";
 
 interface FakeScene {
   id: string;
@@ -142,7 +142,7 @@ describe("scene regeneration guards", () => {
 });
 
 describe("Pinterest visuals", () => {
-  it("queues a search for the worker and keeps the scene's current visual", async () => {
+  it("queues a search for the worker and drops a still image (videos only)", async () => {
     db.scene.findUnique.mockResolvedValue({
       ...complete(0),
       projectId: "p1",
@@ -157,7 +157,45 @@ describe("Pinterest visuals", () => {
     await regenerateSceneVisual("scene_0", { source: "PINTEREST", stockQuery: "neon city" });
     const { data } = db.scene.update.mock.calls[0][0];
     expect(data).toMatchObject({ stockQuery: "neon city", aiClipEngine: "PINTEREST", aiClipStatus: "QUEUED", aiClipPrompt: "neon city" });
-    expect(data).not.toHaveProperty("imageUrl");
+    expect(data).toMatchObject({ imageUrl: null });
+  });
+
+  it("keeps an existing video while a new search runs", async () => {
+    db.scene.findUnique.mockResolvedValue({
+      ...complete(0),
+      videoClipUrl: "https://cdn/pin.mp4",
+      projectId: "p1",
+      narrationText: "Hello",
+      project: { id: "p1", status: "ASSETS_READY", format: "SHORT", channel: {} },
+    });
+    db.scene.update.mockResolvedValue({});
+    db.scene.findMany.mockResolvedValue([]);
+    db.videoProject.updateMany.mockResolvedValue({ count: 1 });
+    await regenerateSceneVisual("scene_0", { source: "PINTEREST", stockQuery: "neon city" });
+    expect(db.scene.update.mock.calls[0][0].data).not.toHaveProperty("imageUrl");
+  });
+
+  it("does not re-run a failed search automatically", async () => {
+    db.scene.findUnique.mockResolvedValue({
+      ...complete(0),
+      imageUrl: null,
+      projectId: "p1",
+      narrationText: "Hello",
+      stockQuery: "rainy street",
+      aiClipEngine: "PINTEREST",
+      aiClipStatus: "FAILED",
+      aiClipError: "No downloadable video Pin found",
+      project: { id: "p1", status: "SCRIPTED", format: "SHORT", channel: {} },
+    });
+    await expect(regenerateSceneVisual("scene_0", { source: "PINTEREST" })).rejects.toThrow(/Pinterest found no video for "rainy street"/);
+    expect(db.scene.update).not.toHaveBeenCalled();
+  });
+
+  it("treats a scene waiting on Pinterest as needing no visual work", () => {
+    const waiting = { ...complete(0), imageUrl: null, aiClipEngine: "PINTEREST", aiClipStatus: "QUEUED" as const };
+    expect(sceneNeedsFill(waiting)).toBe(false);
+    expect(sceneNeedsFill({ ...waiting, voiceAudioUrl: null })).toBe(true);
+    expect(sceneNeedsFill({ ...waiting, aiClipStatus: "FAILED" as const })).toBe(true);
   });
 });
 

@@ -4,7 +4,7 @@ import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { analyzeChannel, findChannelToAnalyze } from "./analytics";
 import { findChannelForGrowthReview, packageProject, runGrowthReview } from "./labsAutomation";
-import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets } from "./pipeline";
+import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets, sceneNeedsFill } from "./pipeline";
 import { pollMuapiClips } from "./muapi";
 import { findVideoToAutoPublish, publishRenderedProject } from "./publish";
 import { firstFreeSlot, formatSlot, isValidCron } from "./schedule";
@@ -159,7 +159,7 @@ function findWork(projects: WorkProject[], channels: Map<string, AutopilotChanne
   }
   for (const p of projects) {
     if (p.status !== ProjectStatus.SCRIPTED && p.status !== ProjectStatus.FAILED) continue;
-    const scene = p.scenes.find((s) => !sceneHasAssets(s) && !s.locked);
+    const scene = p.scenes.find((s) => sceneNeedsFill(s) && !s.locked);
     if (scene) return { kind: "fill" as const, project: p, channel: channels.get(p.channelId)!, sceneId: scene.id };
   }
   for (const p of projects) {

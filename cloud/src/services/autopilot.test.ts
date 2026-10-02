@@ -163,6 +163,14 @@ describe("autopilotTick", () => {
     expect(pipeline.dispatchCloudRender).toHaveBeenCalled();
   });
 
+  it("skips a scene that is waiting on a Pinterest video", async () => {
+    const waiting = { ...ready(0), imageUrl: null, aiClipEngine: "PINTEREST", aiClipStatus: "RUNNING", aiClipUpdatedAt: NOW };
+    projectsQuery({ work: [project({ scenes: [waiting, { ...ready(1), imageUrl: null }] })] });
+    pipeline.fillSceneAssets.mockResolvedValue({ sceneIndex: 1, skipped: null, generated: ["visual"], errors: [] });
+    await autopilotTick(NOW);
+    expect(pipeline.fillSceneAssets).toHaveBeenCalledWith("s1", { visualSource: "PEXELS" });
+  });
+
   it("counts failures and parks the project as FAILED on the last attempt", async () => {
     projectsQuery({ work: [project({ scenes: [{ ...ready(0), voiceAudioUrl: null }], autopilotFailures: MAX_AUTOPILOT_FAILURES - 1 })] });
     pipeline.fillSceneAssets.mockResolvedValue({ sceneIndex: 0, skipped: null, generated: [], errors: ["Voice: edge-tts failed"] });
