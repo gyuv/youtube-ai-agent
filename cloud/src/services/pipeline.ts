@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma, type Scene } from "@/generated/prisma/client";
 import { AiClipStatus, ProjectStatus, VisualSource } from "@/generated/prisma/enums";
+import { optionalEnv } from "@/lib/env";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { EDITABLE_STATUSES, RENDERABLE_STATUSES } from "@/lib/statuses";
@@ -203,7 +204,23 @@ export async function regenerateSceneVisual(sceneId: string, request: VisualRequ
   const source = request.source ?? defaultVisualSource(scene);
   const query = request.stockQuery?.trim() || scene.stockQuery || scene.narrationText.split(/\s+/).slice(0, 4).join(" ");
 
-  const pollinations = async (): Promise<Prisma.SceneUpdateInput> => {
+  const pexels = async (): Promise<Prisma.SceneUpdateInput> => {
+    const stock = await findStockVisual(query, {
+      orientation: canvas.orientation,
+      minDurationSeconds: scene.durationSeconds,
+      excludeUrls: [scene.videoClipUrl, scene.imageUrl].filter((u): u is string => Boolean(u)),
+    });
+    if (!stock) throw new PipelineError("PROVIDER", `Pexels has no ${canvas.orientation} results for "${query}".`);
+    return {
+      stockQuery: query,
+      visualSource: VisualSource.PEXELS,
+      // Pexels assets are served from its CDN; clips are too large to copy through a serverless function.
+      videoClipUrl: stock.kind === "video" ? stock.url : null,
+      imageUrl: stock.kind === "video" ? stock.previewUrl : stock.url,
+    };
+  };
+
+  const generateImage = async (): Promise<Prisma.SceneUpdateInput> => {
     const prompt = request.visualPrompt?.trim() || scene.visualPrompt?.trim();
     if (!prompt) throw new PipelineError("CONFLICT", "The scene has no visual prompt.");
     const style = project.channel.defaultVisualPrompt?.trim();
@@ -216,6 +233,21 @@ export async function regenerateSceneVisual(sceneId: string, request: VisualRequ
       imageUrl: await uploadObject(path, image.bytes, image.contentType),
       videoClipUrl: null,
     };
+  };
+
+  // Automatic fills (no prompt typed by the operator) fall back to Pexels when Pollinations refuses
+  // (402 payment required, 429, outages), so one provider can't stall autopilot.
+  const pollinations = async (): Promise<Prisma.SceneUpdateInput> => {
+    try {
+      return await generateImage();
+    } catch (error) {
+      if (request.visualPrompt?.trim() || !(error instanceof PipelineError) || error.code !== "PROVIDER" || !optionalEnv("PEXELS_API_KEY")) throw error;
+      try {
+        return await pexels();
+      } catch {
+        throw error;
+      }
+    }
   };
 
   let data: Prisma.SceneUpdateInput;
@@ -233,19 +265,7 @@ export async function regenerateSceneVisual(sceneId: string, request: VisualRequ
       aiClipUpdatedAt: new Date(),
     };
   } else if (source === VisualSource.PEXELS) {
-    const stock = await findStockVisual(query, {
-      orientation: canvas.orientation,
-      minDurationSeconds: scene.durationSeconds,
-      excludeUrls: [scene.videoClipUrl, scene.imageUrl].filter((u): u is string => Boolean(u)),
-    });
-    if (!stock) throw new PipelineError("PROVIDER", `Pexels has no ${canvas.orientation} results for "${query}".`);
-    data = {
-      stockQuery: query,
-      visualSource: VisualSource.PEXELS,
-      // Pexels assets are served from its CDN; clips are too large to copy through a serverless function.
-      videoClipUrl: stock.kind === "video" ? stock.url : null,
-      imageUrl: stock.kind === "video" ? stock.previewUrl : stock.url,
-    };
+    data = await pexels();
   } else {
     data = await pollinations();
   }
