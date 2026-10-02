@@ -38,6 +38,10 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      # Optional paid engine (Muapi.ai, behind Open-Higgsfield-AI): better images, and with the
+      # KZ_MUAPI_VIDEO_MODEL repository variable (e.g. wan2.2-image-to-video) real animated scenes.
+      MUAPI_API_KEY: ${{ secrets.MUAPI_API_KEY }}
+      KZ_MUAPI_VIDEO_MODEL: ${{ vars.KZ_MUAPI_VIDEO_MODEL }}
       YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
       YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
       YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}

@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProjectStatus } from "@/generated/prisma/enums";
 import { EDITABLE_STATUSES, IN_FLIGHT_STATUSES, RENDERABLE_STATUSES } from "@/lib/statuses";
 import { sceneHasAssets } from "@/services/pipeline";
+import { MUAPI_VIDEO_MODELS, muapiEnabled, pollMuapiClips } from "@/services/muapi";
 import { getStudioProject } from "@/services/projects";
 import { actionsRunUrl } from "@/services/renderDispatcher";
 import { formatSlot } from "@/services/schedule";
@@ -40,6 +41,8 @@ const ScriptOutline = z.object({ timestamps: z.array(z.object({ kind: z.string()
 
 export default async function StudioPage({ params, searchParams }: Params) {
   const [{ id }, { autoscript }] = await Promise.all([params, searchParams]);
+  // Collect any finished Muapi clips first (the page auto-refreshes while clips are pending).
+  await pollMuapiClips(id).catch((error) => console.error("Muapi poll failed", error));
   const project = await getStudioProject(id);
   if (!project) notFound();
 
@@ -64,6 +67,7 @@ export default async function StudioPage({ params, searchParams }: Params) {
       videoClipUrl: s.videoClipUrl,
       visualSource: s.visualSource,
       aiClipStatus: s.aiClipStatus,
+      aiClipEngine: s.aiClipEngine,
       aiClipPrompt: s.aiClipPrompt,
       aiClipError: s.aiClipError,
       durationSeconds: s.durationSeconds,
@@ -280,7 +284,7 @@ export default async function StudioPage({ params, searchParams }: Params) {
               <TimelineStrip scenes={scenes} />
               {scenes.map((scene) => (
                 // Remount when the server copy changes so local edits never shadow fresh data.
-                <SceneCard key={`${scene.id}-${scene.updatedAt}`} projectId={project.id} scene={scene} format={project.format} editable={editable} />
+                <SceneCard key={`${scene.id}-${scene.updatedAt}`} projectId={project.id} scene={scene} format={project.format} editable={editable} muapi={muapiEnabled() ? MUAPI_VIDEO_MODELS.map((m) => ({ ...m })) : null} />
               ))}
             </>
           )}

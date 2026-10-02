@@ -67,7 +67,9 @@ describe("claimNextClip", () => {
     expect(db.scene.updateMany.mock.calls[0][0].data).toEqual({ aiClipStatus: "RUNNING", aiClipUpdatedAt: NOW });
     // Abandoned claims become claimable again after the TTL.
     const where = db.scene.findFirst.mock.calls[0][0].where;
-    expect(where.OR[1].aiClipUpdatedAt.lt.getTime()).toBe(NOW.getTime() - CLAIM_TTL_MS);
+    expect(where.AND[1].OR[1].aiClipUpdatedAt.lt.getTime()).toBe(NOW.getTime() - CLAIM_TTL_MS);
+    // Muapi clips never go to the GPU worker.
+    expect(where.AND[0]).toEqual({ OR: [{ aiClipEngine: null }, { aiClipEngine: { not: "MUAPI" } }] });
   });
 
   it("retries when another worker wins the race", async () => {

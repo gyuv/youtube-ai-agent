@@ -57,7 +57,14 @@ export async function queueSceneClip(sceneId: string, prompt?: string) {
   const text = prompt?.trim() || clipPromptFor(scene, scene.project.channel.defaultVisualPrompt);
   return prisma.scene.update({
     where: { id: sceneId },
-    data: { aiClipStatus: AiClipStatus.QUEUED, aiClipPrompt: text.slice(0, MAX_PROMPT_CHARS), aiClipError: null, aiClipUpdatedAt: new Date() },
+    data: {
+      aiClipStatus: AiClipStatus.QUEUED,
+      aiClipPrompt: text.slice(0, MAX_PROMPT_CHARS),
+      aiClipError: null,
+      aiClipUpdatedAt: new Date(),
+      aiClipEngine: "WAN2GP",
+      aiClipRequestId: null,
+    },
   });
 }
 
@@ -65,7 +72,7 @@ export async function queueSceneClip(sceneId: string, prompt?: string) {
 export async function cancelSceneClip(sceneId: string) {
   return prisma.scene.update({
     where: { id: sceneId },
-    data: { aiClipStatus: null, aiClipError: null, aiClipUpdatedAt: new Date() },
+    data: { aiClipStatus: null, aiClipError: null, aiClipUpdatedAt: new Date(), aiClipRequestId: null },
   });
 }
 
@@ -88,7 +95,11 @@ export async function claimNextClip(now = new Date()): Promise<ClipJob | null> {
   const where = {
     project: { status: { in: EDITABLE } },
     locked: false,
-    OR: [{ aiClipStatus: AiClipStatus.QUEUED }, { aiClipStatus: AiClipStatus.RUNNING, aiClipUpdatedAt: { lt: stale } }],
+    // Muapi clips are rendered by Muapi and polled by the app, never handed to the GPU worker.
+    AND: [
+      { OR: [{ aiClipEngine: null }, { aiClipEngine: { not: "MUAPI" } }] },
+      { OR: [{ aiClipStatus: AiClipStatus.QUEUED }, { aiClipStatus: AiClipStatus.RUNNING, aiClipUpdatedAt: { lt: stale } }] },
+    ],
   };
 
   // Two workers can race for the same row; the conditional update lets exactly one win.

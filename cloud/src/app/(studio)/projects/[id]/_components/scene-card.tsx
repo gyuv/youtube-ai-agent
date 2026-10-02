@@ -4,7 +4,7 @@ import { Check, CircleAlert, Clapperboard, Film, ImageIcon, LoaderCircle, Lock, 
 import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Switch, Textarea } from "@/components/ui/form-controls";
+import { Input, Label, Select, Switch, Textarea } from "@/components/ui/form-controls";
 import type { ActionResult } from "@/lib/action";
 import { cn } from "@/lib/utils";
 import { cancelAiClipAction, queueAiClipAction, regenerateAudioAction, regenerateVisualAction, saveNarrationAction, setSceneLockedAction } from "../../actions";
@@ -14,16 +14,31 @@ type Busy = "save" | "voice" | "visual" | "clip" | "lock" | null;
 type Source = "POLLINATIONS" | "PEXELS" | "WAN2GP";
 
 function initialSource(scene: StudioScene): Source {
-  if (scene.aiClipStatus || scene.visualSource === "WAN2GP") return "WAN2GP";
+  if (scene.aiClipStatus || scene.visualSource === "WAN2GP" || scene.visualSource === "MUAPI") return "WAN2GP";
   return scene.visualSource === "PEXELS" ? "PEXELS" : "POLLINATIONS";
 }
 
-export function SceneCard({ projectId, scene, format, editable }: { projectId: string; scene: StudioScene; format: "SHORT" | "LONG_FORM"; editable: boolean }) {
+export function SceneCard({
+  projectId,
+  scene,
+  format,
+  editable,
+  muapi,
+}: {
+  projectId: string;
+  scene: StudioScene;
+  format: "SHORT" | "LONG_FORM";
+  editable: boolean;
+  /** Muapi image-to-video models, or null when MUAPI_API_KEY isn't set. */
+  muapi: Array<{ endpoint: string; label: string }> | null;
+}) {
   const [text, setText] = useState(scene.narrationText);
   const [prompt, setPrompt] = useState(scene.visualPrompt ?? "");
   const [query, setQuery] = useState(scene.stockQuery ?? "");
   const [source, setSource] = useState<Source>(initialSource(scene));
   const [clipPrompt, setClipPrompt] = useState(scene.aiClipPrompt ?? scene.visualPrompt ?? "");
+  const [engine, setEngine] = useState<"WAN2GP" | "MUAPI">(scene.aiClipEngine === "MUAPI" || (muapi && scene.visualSource === "MUAPI") ? "MUAPI" : "WAN2GP");
+  const [muapiModel, setMuapiModel] = useState(muapi?.[0]?.endpoint ?? "");
   const [busy, setBusy] = useState<Busy>(null);
   const [, startTransition] = useTransition();
   // The switch flips immediately and falls back to the server value if the action fails.
@@ -152,6 +167,24 @@ export function SceneCard({ projectId, scene, format, editable }: { projectId: s
               </div>
             ) : source === "WAN2GP" ? (
               <div className="grid gap-2">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">Engine</span>
+                  <Select value={engine} onChange={(e) => setEngine(e.target.value as "WAN2GP" | "MUAPI")} disabled={!editable || locked} aria-label={`${label} AI video engine`} className="h-7 w-auto text-xs">
+                    <option value="WAN2GP">Wan2GP · free (Colab worker)</option>
+                    <option value="MUAPI" disabled={!muapi}>
+                      Muapi · paid (Kling, Seedance, Veo…){muapi ? "" : " — add MUAPI_API_KEY"}
+                    </option>
+                  </Select>
+                  {engine === "MUAPI" && muapi ? (
+                    <Select value={muapiModel} onChange={(e) => setMuapiModel(e.target.value)} disabled={!editable || locked} aria-label={`${label} Muapi model`} className="h-7 w-auto text-xs">
+                      {muapi.map((m) => (
+                        <option key={m.endpoint} value={m.endpoint}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : null}
+                </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
                   <Textarea value={clipPrompt} onChange={(e) => setClipPrompt(e.target.value)} rows={2} disabled={!editable || locked} placeholder="Describe the motion: subject, action, camera" aria-label={`${label} AI video prompt`} className="min-h-0" />
                   {scene.aiClipStatus === "QUEUED" || scene.aiClipStatus === "RUNNING" ? (
@@ -163,9 +196,15 @@ export function SceneCard({ projectId, scene, format, editable }: { projectId: s
                       size="sm"
                       variant="secondary"
                       disabled={disabled}
-                      onClick={() => run("clip", () => queueAiClipAction(projectId, scene.id, clipPrompt), `${label}: AI video queued for the Wan2GP worker`)}
+                      onClick={() =>
+                        run(
+                          "clip",
+                          () => queueAiClipAction(projectId, scene.id, clipPrompt, engine, engine === "MUAPI" ? muapiModel : undefined),
+                          engine === "MUAPI" ? `${label}: sent to Muapi; the clip appears in a few minutes` : `${label}: AI video queued for the Wan2GP worker`,
+                        )
+                      }
                     >
-                      {spinner("clip", <Film />)} {scene.visualSource === "WAN2GP" ? "Generate another" : "Queue AI video"}
+                      {spinner("clip", <Film />)} {scene.visualSource === "WAN2GP" || scene.visualSource === "MUAPI" ? "Generate another" : engine === "MUAPI" ? "Animate with Muapi" : "Queue AI video"}
                     </Button>
                   )}
                 </div>
@@ -192,8 +231,14 @@ export function SceneCard({ projectId, scene, format, editable }: { projectId: s
 }
 
 function ClipStatus({ scene }: { scene: StudioScene }) {
-  const text =
-    scene.aiClipStatus === "QUEUED"
+  const muapi = scene.aiClipEngine === "MUAPI";
+  const text = muapi && scene.aiClipStatus === "RUNNING"
+    ? "Muapi is animating this scene's image (usually 1-5 minutes). This page checks on it by itself."
+    : muapi && scene.aiClipStatus === "FAILED"
+      ? `Muapi failed: ${scene.aiClipError ?? "unknown error"}`
+      : scene.visualSource === "MUAPI" && !scene.aiClipStatus
+        ? "Using a Muapi clip. Short clips loop to cover the narration."
+        : scene.aiClipStatus === "QUEUED"
       ? "Waiting for the Wan2GP worker. Start the Colab notebook if it isn't running."
       : scene.aiClipStatus === "RUNNING"
         ? "Generating on the GPU worker (a few minutes per clip). The current visual stays until it's done."
