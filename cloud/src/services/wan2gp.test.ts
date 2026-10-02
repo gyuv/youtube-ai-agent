@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
-  scene: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+  scene: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
   videoProject: { updateMany: vi.fn() },
 }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
@@ -11,7 +11,7 @@ vi.mock("@/lib/storage", () => ({
   uploadObject: vi.fn(),
 }));
 
-import { CLAIM_TTL_MS, claimNextClip, clipPromptFor, completeClip, queueSceneClip } from "./wan2gp";
+import { CLAIM_TTL_MS, claimNextClip, countClaimableClips, clipPromptFor, completeClip, queueSceneClip } from "./wan2gp";
 
 const NOW = new Date("2026-10-01T10:00:00.000Z");
 const SCENE = {
@@ -79,6 +79,13 @@ describe("claimNextClip", () => {
     expect(job?.prompt).toBe("trading floor");
     expect(job?.upload.url).toMatch(/\/pinterest-[0-9a-f]{12}\.mp4$/);
     expect(db.scene.findFirst.mock.calls[0][0].where.AND[0]).toEqual({ aiClipEngine: "PINTEREST" });
+  });
+
+  it("counts claimable Pinterest searches without claiming them", async () => {
+    db.scene.count.mockResolvedValue(2);
+    expect(await countClaimableClips("PINTEREST", NOW)).toBe(2);
+    expect(db.scene.count.mock.calls[0][0].where.AND[0]).toEqual({ aiClipEngine: "PINTEREST" });
+    expect(db.scene.updateMany).not.toHaveBeenCalled();
   });
 
   it("retries when another worker wins the race", async () => {
