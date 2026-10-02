@@ -285,12 +285,12 @@ function PinterestStatus({ scene }: { scene: StudioScene }) {
     status === "QUEUED"
       ? "Waiting for the Pinterest worker. Start cloud/pinterest/pinterest_source.py --worker if it isn't running."
       : status === "RUNNING"
-        ? "The worker is searching Pinterest and downloading the first video Pin. The current visual stays until it's done."
+        ? "The worker is searching Pinterest and downloading the first video Pin (image Pins are skipped)."
         : status === "FAILED"
           ? `Pinterest search failed: ${scene.aiClipError ?? "unknown error"}`
           : scene.visualSource === "PINTEREST"
             ? "Using a Pinterest video. Short clips loop to cover the narration."
-            : "A worker outside Vercel searches Pinterest for this phrase and uses the first video Pin it can download.";
+            : "A worker outside Vercel searches Pinterest for this phrase and uses the first video Pin it can download. Videos only: the scene has no visual until one arrives.";
   return (
     <p className={cn("flex items-start gap-1.5 text-xs", status === "FAILED" ? "text-destructive" : "text-muted-foreground")}>
       {status === "QUEUED" || status === "RUNNING" ? <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin" /> : null}

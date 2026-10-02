@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma, type Scene } from "@/generated/prisma/client";
 import { AiClipStatus, ProjectStatus, VisualSource } from "@/generated/prisma/enums";
+import { optionalEnv } from "@/lib/env";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { EDITABLE_STATUSES, RENDERABLE_STATUSES } from "@/lib/statuses";
@@ -26,6 +27,17 @@ const ASSET_TRACKED: ProjectStatus[] = [
 ];
 
 type SceneAssets = Pick<Scene, "voiceAudioUrl" | "imageUrl" | "videoClipUrl" | "durationSeconds">;
+
+/** A Pinterest search is queued or running, so the scene's visual is on its way. */
+export function pinterestPending(scene: Partial<Pick<Scene, "aiClipEngine" | "aiClipStatus">>): boolean {
+  return scene.aiClipEngine === "PINTEREST" && (scene.aiClipStatus === AiClipStatus.QUEUED || scene.aiClipStatus === AiClipStatus.RUNNING);
+}
+
+/** What fillSceneAssets would do for the scene; a pending Pinterest search needs no visual work. */
+export function sceneNeedsFill(scene: SceneAssets & Partial<Pick<Scene, "aiClipEngine" | "aiClipStatus">>): boolean {
+  if (!scene.voiceAudioUrl) return true;
+  return !scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene);
+}
 
 export function sceneHasAssets(scene: SceneAssets): boolean {
   return Boolean(scene.voiceAudioUrl && (scene.imageUrl || scene.videoClipUrl) && scene.durationSeconds > 0);
@@ -203,7 +215,23 @@ export async function regenerateSceneVisual(sceneId: string, request: VisualRequ
   const source = request.source ?? defaultVisualSource(scene);
   const query = request.stockQuery?.trim() || scene.stockQuery || scene.narrationText.split(/\s+/).slice(0, 4).join(" ");
 
-  const pollinations = async (): Promise<Prisma.SceneUpdateInput> => {
+  const pexels = async (): Promise<Prisma.SceneUpdateInput> => {
+    const stock = await findStockVisual(query, {
+      orientation: canvas.orientation,
+      minDurationSeconds: scene.durationSeconds,
+      excludeUrls: [scene.videoClipUrl, scene.imageUrl].filter((u): u is string => Boolean(u)),
+    });
+    if (!stock) throw new PipelineError("PROVIDER", `Pexels has no ${canvas.orientation} results for "${query}".`);
+    return {
+      stockQuery: query,
+      visualSource: VisualSource.PEXELS,
+      // Pexels assets are served from its CDN; clips are too large to copy through a serverless function.
+      videoClipUrl: stock.kind === "video" ? stock.url : null,
+      imageUrl: stock.kind === "video" ? stock.previewUrl : stock.url,
+    };
+  };
+
+  const generateImage = async (): Promise<Prisma.SceneUpdateInput> => {
     const prompt = request.visualPrompt?.trim() || scene.visualPrompt?.trim();
     if (!prompt) throw new PipelineError("CONFLICT", "The scene has no visual prompt.");
     const style = project.channel.defaultVisualPrompt?.trim();
@@ -218,12 +246,32 @@ export async function regenerateSceneVisual(sceneId: string, request: VisualRequ
     };
   };
 
+  // Automatic fills (no prompt typed by the operator) fall back to Pexels when Pollinations refuses
+  // (402 payment required, 429, outages), so one provider can't stall autopilot.
+  const pollinations = async (): Promise<Prisma.SceneUpdateInput> => {
+    try {
+      return await generateImage();
+    } catch (error) {
+      if (request.visualPrompt?.trim() || !(error instanceof PipelineError) || error.code !== "PROVIDER" || !optionalEnv("PEXELS_API_KEY")) throw error;
+      try {
+        return await pexels();
+      } catch {
+        throw error;
+      }
+    }
+  };
+
   let data: Prisma.SceneUpdateInput;
   if (source === VisualSource.PINTEREST) {
     // Pinterest is scraped by a worker outside Vercel (cloud/pinterest/), so this only queues the
-    // search. A scene with no visual gets an AI image meanwhile, so a render never waits on the worker.
+    // search. Pinterest scenes are video-only: no placeholder image, and a still the scene had is
+    // dropped, so the scene (and its render) waits for the worker's video.
+    if (!request.stockQuery?.trim() && scene.aiClipEngine === "PINTEREST" && scene.aiClipStatus === AiClipStatus.FAILED) {
+      // Automatic fills don't re-run a search that already failed; the operator edits the query instead.
+      throw new PipelineError("PROVIDER", `Pinterest found no video for "${query}": ${scene.aiClipError ?? "unknown error"}. Try another search phrase.`);
+    }
     data = {
-      ...(scene.imageUrl || scene.videoClipUrl ? {} : await pollinations()),
+      ...(scene.videoClipUrl ? {} : { imageUrl: null }),
       stockQuery: query,
       aiClipEngine: "PINTEREST",
       aiClipStatus: AiClipStatus.QUEUED,
@@ -233,19 +281,7 @@ export async function regenerateSceneVisual(sceneId: string, request: VisualRequ
       aiClipUpdatedAt: new Date(),
     };
   } else if (source === VisualSource.PEXELS) {
-    const stock = await findStockVisual(query, {
-      orientation: canvas.orientation,
-      minDurationSeconds: scene.durationSeconds,
-      excludeUrls: [scene.videoClipUrl, scene.imageUrl].filter((u): u is string => Boolean(u)),
-    });
-    if (!stock) throw new PipelineError("PROVIDER", `Pexels has no ${canvas.orientation} results for "${query}".`);
-    data = {
-      stockQuery: query,
-      visualSource: VisualSource.PEXELS,
-      // Pexels assets are served from its CDN; clips are too large to copy through a serverless function.
-      videoClipUrl: stock.kind === "video" ? stock.url : null,
-      imageUrl: stock.kind === "video" ? stock.previewUrl : stock.url,
-    };
+    data = await pexels();
   } else {
     data = await pollinations();
   }
@@ -284,7 +320,7 @@ export async function fillSceneAssets(sceneId: string, options: { visualSource?:
       result.errors.push(`Voice: ${errorMessage(error)}`);
     }
   }
-  if (!scene.imageUrl && !scene.videoClipUrl) {
+  if (!scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene)) {
     try {
       await regenerateSceneVisual(sceneId, { source: options.visualSource });
       result.generated.push("visual");
@@ -329,7 +365,7 @@ export async function generateProjectAssets(projectId: string): Promise<AssetRun
         summary.failed.push({ sceneIndex: scene.sceneIndex, step: "audio", error: errorMessage(error) });
       }
     }
-    if (!scene.imageUrl && !scene.videoClipUrl) {
+    if (!scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene)) {
       try {
         await regenerateSceneVisual(scene.id);
         summary.generated++;

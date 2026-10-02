@@ -80,7 +80,12 @@ export async function generatePollinationsImage(prompt: string, options: Pollina
   const contentType = res.headers.get("content-type") ?? "";
   if (!res.ok || !contentType.startsWith("image/")) {
     const detail = await res.text().catch(() => "");
-    const hint = res.status === 429 ? " (rate limited; wait a few seconds or set POLLINATIONS_TOKEN)" : "";
+    const hint =
+      res.status === 429
+        ? " (rate limited; wait a few seconds or set POLLINATIONS_TOKEN)"
+        : res.status === 402
+          ? " (payment required: Pollinations wants a token or credits for this request; set POLLINATIONS_TOKEN, or use Pexels visuals)"
+          : "";
     throw new PipelineError("PROVIDER", `Pollinations returned ${res.status} ${contentType}${hint}: ${detail.slice(0, 200)}`);
   }
   const bytes = Buffer.from(await res.arrayBuffer());

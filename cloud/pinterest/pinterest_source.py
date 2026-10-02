@@ -1,5 +1,7 @@
 """Pinterest video source: search Pinterest for a topic and download the first video Pin.
 
+Videos only: image Pins are skipped, and a download that isn't a video file is discarded.
+
 Playwright (sync API) loads the public search page and collects Pin URLs; yt-dlp then tries
 each one in order and keeps the first that yields a video. Image-only Pins (and any Pin yt-dlp
 cannot handle) are skipped. The file lands in a temporary directory the caller owns.
@@ -35,6 +37,7 @@ from yt_dlp.utils import DownloadError
 
 SEARCH_URL = "https://www.pinterest.com/search/pins/?q={query}"
 PIN_PATH = re.compile(r"^/pin/(\d+)/?")
+VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".m4v", ".mkv"}
 SCROLLS = 4
 NAV_TIMEOUT_MS = 30_000
 POLL_SECONDS = 20
@@ -77,7 +80,8 @@ def download_first_video(pin_urls: list[str], out_dir: Path) -> Path | None:
     """Download the first Pin that is a video into out_dir; return its path, or None."""
     options = {
         "outtmpl": str(out_dir / "pinterest-%(id)s.%(ext)s"),
-        "format": "bestvideo*+bestaudio/best",
+        # Video renditions only: a still or a GIF-like image is never accepted as a Pin's "best".
+        "format": "bestvideo*+bestaudio/best[vcodec!=none]",
         "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
@@ -93,8 +97,11 @@ def download_first_video(pin_urls: list[str], out_dir: Path) -> Path | None:
                     continue
                 info = ydl.process_ie_result(info, download=True)
                 path = Path(info["requested_downloads"][0]["filepath"]) if info.get("requested_downloads") else None
-                if path and path.exists():
+                if path and path.exists() and path.suffix.lower() in VIDEO_SUFFIXES:
                     return path
+                if path and path.exists():
+                    path.unlink()  # not a video file; never hand an image to Lumen
+                print(f"skip (download was not a video): {url}", file=sys.stderr)
             except (DownloadError, KeyError, OSError) as error:
                 print(f"skip ({type(error).__name__}): {url}: {error}", file=sys.stderr)
                 continue
