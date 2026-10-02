@@ -26,7 +26,10 @@ describe("operator sessions", () => {
     const token = await createSessionToken();
     const [version, expires, signature] = token.split(".");
     expect(await verifySessionToken(`${version}.${Number(expires) + 999}.${signature}`)).toBe(false);
-    expect(await verifySessionToken(`${version}.${expires}.${signature.slice(0, -2)}xx`)).toBe(false);
+    // Change the first character: the last base64url character carries spare bits, so editing it
+    // can leave the decoded signature unchanged.
+    const tampered = `${signature[0] === "A" ? "B" : "A"}${signature.slice(1)}`;
+    expect(await verifySessionToken(`${version}.${expires}.${tampered}`)).toBe(false);
     expect(await verifySessionToken("v1.garbage")).toBe(false);
     expect(await verifySessionToken(undefined)).toBe(false);
   });

@@ -20,7 +20,7 @@ vi.mock("./publish", () => publish);
 vi.mock("./analytics", () => analytics);
 vi.mock("./labsAutomation", () => labs);
 
-import { MAX_AUTOPILOT_FAILURES, PINTEREST_WAIT_MS, autopilotTick, createVideoNow, createVideosAhead } from "./autopilot";
+import { MAX_AUTOPILOT_FAILURES, PINTEREST_WAIT_MS, PROVIDER_RETRY_MS, autopilotTick, createVideoNow, createVideosAhead } from "./autopilot";
 
 const NOW = new Date("2026-09-29T00:00:00Z"); // Tuesday
 const CHANNEL = {
@@ -178,6 +178,27 @@ describe("autopilotTick", () => {
     expect(result).toMatchObject({ action: "error", more: true });
     expect(result.message).toMatch(/Autopilot gave up/);
     expect(db.videoProject.update.mock.calls[0][0].data).toMatchObject({ autopilotFailures: 3, status: "FAILED" });
+  });
+
+  it("waits and retries when only an outside service refused, without using up an attempt", async () => {
+    projectsQuery({ work: [project({ scenes: [{ ...ready(0), imageUrl: null }], autopilotFailures: MAX_AUTOPILOT_FAILURES - 1 })] });
+    pipeline.fillSceneAssets.mockResolvedValue({
+      sceneIndex: 0,
+      skipped: null,
+      generated: [],
+      errors: ["Visual: Pollinations returned 402"],
+      providerOnly: true,
+    });
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "waiting", more: true });
+    const data = db.videoProject.update.mock.calls[0][0].data;
+    expect(data).toEqual({ autopilotRetryAt: new Date(NOW.getTime() + PROVIDER_RETRY_MS), lastError: null });
+  });
+
+  it("leaves a waiting project alone until its retry time", async () => {
+    projectsQuery({ work: [project({ scenes: [{ ...ready(0), imageUrl: null }], autopilotRetryAt: new Date(NOW.getTime() + 60_000) })] });
+    await autopilotTick(NOW);
+    expect(pipeline.fillSceneAssets).not.toHaveBeenCalled();
   });
 
   it("writes the script for a planned video", async () => {
