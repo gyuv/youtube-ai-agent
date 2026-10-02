@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Prisma, type Scene } from "@/generated/prisma/client";
-import { ProjectStatus, VisualSource } from "@/generated/prisma/enums";
+import { AiClipStatus, ProjectStatus, VisualSource } from "@/generated/prisma/enums";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { EDITABLE_STATUSES, RENDERABLE_STATUSES } from "@/lib/statuses";
@@ -181,26 +181,58 @@ export async function regenerateSceneAudio(sceneId: string, options: { narration
 // ─────────────────────────────────────────────────────────────
 
 export interface VisualRequest {
-  source?: "POLLINATIONS" | "PEXELS";
+  source?: "POLLINATIONS" | "PEXELS" | "PINTEREST";
   /** New image prompt (Pollinations). Saved on the scene. */
   visualPrompt?: string;
-  /** New stock search phrase (Pexels). Saved on the scene. */
+  /** New stock search phrase (Pexels, Pinterest). Saved on the scene. */
   stockQuery?: string;
 }
 
 const IMAGE_EXTENSIONS: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+
+function defaultVisualSource(scene: Pick<Scene, "visualSource">): "POLLINATIONS" | "PEXELS" | "PINTEREST" {
+  if (scene.visualSource === VisualSource.PEXELS || scene.visualSource === VisualSource.PINTEREST) return scene.visualSource;
+  return VisualSource.POLLINATIONS;
+}
 
 /** Replace one scene's visual without touching any other scene. */
 export async function regenerateSceneVisual(sceneId: string, request: VisualRequest = {}) {
   const scene = await loadScene(sceneId);
   const { project } = scene;
   const canvas = canvasFor(project.format);
-  const source =
-    request.source ?? (scene.visualSource === VisualSource.PEXELS ? VisualSource.PEXELS : VisualSource.POLLINATIONS);
+  const source = request.source ?? defaultVisualSource(scene);
+  const query = request.stockQuery?.trim() || scene.stockQuery || scene.narrationText.split(/\s+/).slice(0, 4).join(" ");
+
+  const pollinations = async (): Promise<Prisma.SceneUpdateInput> => {
+    const prompt = request.visualPrompt?.trim() || scene.visualPrompt?.trim();
+    if (!prompt) throw new PipelineError("CONFLICT", "The scene has no visual prompt.");
+    const style = project.channel.defaultVisualPrompt?.trim();
+    const image = await generatePollinationsImage(style ? `${prompt}. Style: ${style}` : prompt, canvas);
+    const ext = IMAGE_EXTENSIONS[image.contentType.split(";")[0]] ?? "jpg";
+    const path = `projects/${project.id}/scenes/${scene.id}/visual-${shortHash(prompt, image.seed)}.${ext}`;
+    return {
+      visualPrompt: prompt,
+      visualSource: VisualSource.POLLINATIONS,
+      imageUrl: await uploadObject(path, image.bytes, image.contentType),
+      videoClipUrl: null,
+    };
+  };
 
   let data: Prisma.SceneUpdateInput;
-  if (source === VisualSource.PEXELS) {
-    const query = request.stockQuery?.trim() || scene.stockQuery || scene.narrationText.split(/\s+/).slice(0, 4).join(" ");
+  if (source === VisualSource.PINTEREST) {
+    // Pinterest is scraped by a worker outside Vercel (cloud/pinterest/), so this only queues the
+    // search. A scene with no visual gets an AI image meanwhile, so a render never waits on the worker.
+    data = {
+      ...(scene.imageUrl || scene.videoClipUrl ? {} : await pollinations()),
+      stockQuery: query,
+      aiClipEngine: "PINTEREST",
+      aiClipStatus: AiClipStatus.QUEUED,
+      aiClipPrompt: query.slice(0, 120),
+      aiClipError: null,
+      aiClipRequestId: null,
+      aiClipUpdatedAt: new Date(),
+    };
+  } else if (source === VisualSource.PEXELS) {
     const stock = await findStockVisual(query, {
       orientation: canvas.orientation,
       minDurationSeconds: scene.durationSeconds,
@@ -215,18 +247,7 @@ export async function regenerateSceneVisual(sceneId: string, request: VisualRequ
       imageUrl: stock.kind === "video" ? stock.previewUrl : stock.url,
     };
   } else {
-    const prompt = request.visualPrompt?.trim() || scene.visualPrompt?.trim();
-    if (!prompt) throw new PipelineError("CONFLICT", "The scene has no visual prompt.");
-    const style = project.channel.defaultVisualPrompt?.trim();
-    const image = await generatePollinationsImage(style ? `${prompt}. Style: ${style}` : prompt, canvas);
-    const ext = IMAGE_EXTENSIONS[image.contentType.split(";")[0]] ?? "jpg";
-    const path = `projects/${project.id}/scenes/${scene.id}/visual-${shortHash(prompt, image.seed)}.${ext}`;
-    data = {
-      visualPrompt: prompt,
-      visualSource: VisualSource.POLLINATIONS,
-      imageUrl: await uploadObject(path, image.bytes, image.contentType),
-      videoClipUrl: null,
-    };
+    data = await pollinations();
   }
 
   const updated = await prisma.scene.update({ where: { id: sceneId }, data });

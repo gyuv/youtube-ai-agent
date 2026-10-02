@@ -38,7 +38,7 @@ export const ChannelInputSchema = z
   autopilot: checkbox,
   autopilotReview: checkbox,
   autopilotLeadHours: z.coerce.number().int().min(6, "At least 6 hours").max(168, "At most 7 days (168 hours)").default(36),
-  autopilotVisualSource: z.enum(["POLLINATIONS", "PEXELS"]).default("POLLINATIONS"),
+  autopilotVisualSource: z.enum(["POLLINATIONS", "PEXELS", "PINTEREST"]).default("POLLINATIONS"),
   topicBacklog: optionalText(10_000),
   learnFromAnalytics: checkbox,
   autoLabs: checkbox,

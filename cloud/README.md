@@ -15,7 +15,7 @@ does no rendering and runs no scripts; it only needs a browser.
 | Media storage | Supabase Storage (or a Cloudflare R2 bucket) |
 | Script and metadata | Gemini Flash via Google AI Studio |
 | Voiceover | `edge-tts` neural voices |
-| Visuals | Pollinations.ai (keyless) and Pexels; optional Wan2GP AI video clips from a GPU worker (free Colab) |
+| Visuals | Pollinations.ai (keyless) and Pexels; optional Wan2GP AI video clips from a GPU worker (free Colab); optional Pinterest video Pins from a scraper worker |
 | Rendering | GitHub Actions runner (Remotion / FFmpeg), started through `repository_dispatch` |
 | Publishing | YouTube Data API v3 (OAuth2) |
 
@@ -50,7 +50,7 @@ The workflows live at the repository root, because GitHub only reads them from t
 | --- | --- |
 | `scriptGenerator.ts` | Gemini structured JSON (hook, sections, CTA, image prompts, stock queries, title/description/tags), validated with zod; estimated timestamps; YouTube chapter builder. Falls back to `GEMINI_FALLBACK_MODEL` on 429. |
 | `ttsGenerator.ts` | edge-tts neural voices via `msedge-tts` (pure Node, no Python): mp3 + word timings for captions. Narration is SSML-escaped; voice/rate/pitch are strictly validated. |
-| `wan2gp.ts` | Queue for Wan2GP AI video clips. A GPU worker (`colab/wan2gp_worker.py`) claims scenes via `/api/wan2gp/claim`, uploads the mp4 through a signed URL and reports to `/api/wan2gp/complete`. Abandoned claims re-queue after 45 min. |
+| `wan2gp.ts` | Queue for Wan2GP AI video clips. A GPU worker (`colab/wan2gp_worker.py`) claims scenes via `/api/wan2gp/claim`, uploads the mp4 through a signed URL and reports to `/api/wan2gp/complete`. Abandoned claims re-queue after 45 min. The Pinterest worker (`pinterest/pinterest_source.py --worker`, secret `PINTEREST_WORKER_SECRET`) uses the same queue through `/api/pinterest/claim` and `/complete`; autopilot holds a render up to 2 h for a pending Pinterest search. |
 | `visualFetcher.ts` | Pollinations.ai images (downloaded, then stored in Supabase) and Pexels B-roll with a stock-photo fallback, picking the ~1080p rendition. |
 | `renderDispatcher.ts` | `repository_dispatch` → `.github/workflows/render-video.yml`, payload is just the project id. |
 | `pipeline.ts` | DB orchestration: whole-script generation, per-scene audio/visual regeneration, bulk asset fill, and an atomic claim before dispatching a render. |

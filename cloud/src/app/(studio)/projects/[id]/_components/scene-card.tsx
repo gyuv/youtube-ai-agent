@@ -11,9 +11,10 @@ import { cancelAiClipAction, queueAiClipAction, regenerateAudioAction, regenerat
 import type { StudioScene } from "./types";
 
 type Busy = "save" | "voice" | "visual" | "clip" | "lock" | null;
-type Source = "POLLINATIONS" | "PEXELS" | "WAN2GP";
+type Source = "POLLINATIONS" | "PEXELS" | "PINTEREST" | "WAN2GP";
 
 function initialSource(scene: StudioScene): Source {
+  if (scene.aiClipEngine === "PINTEREST" || scene.visualSource === "PINTEREST") return "PINTEREST";
   if (scene.aiClipStatus || scene.visualSource === "WAN2GP" || scene.visualSource === "MUAPI") return "WAN2GP";
   return scene.visualSource === "PEXELS" ? "PEXELS" : "POLLINATIONS";
 }
@@ -137,6 +138,7 @@ export function SceneCard({
                   [
                     ["POLLINATIONS", "AI image"],
                     ["PEXELS", "Stock B-roll"],
+                    ["PINTEREST", "Pinterest"],
                     ["WAN2GP", "AI video"],
                   ] as const
                 ).map(([value, text]) => (
@@ -210,6 +212,27 @@ export function SceneCard({
                 </div>
                 <ClipStatus scene={scene} />
               </div>
+            ) : source === "PINTEREST" ? (
+              <div className="grid gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Input value={query} onChange={(e) => setQuery(e.target.value)} disabled={!editable || locked} placeholder="e.g. rainy city street" aria-label={`${label} Pinterest search`} />
+                  {scene.aiClipEngine === "PINTEREST" && (scene.aiClipStatus === "QUEUED" || scene.aiClipStatus === "RUNNING") ? (
+                    <Button size="sm" variant="outline" disabled={disabled} onClick={() => run("clip", () => cancelAiClipAction(projectId, scene.id), `${label}: Pinterest search cancelled`)}>
+                      {spinner("clip", <X />)} Cancel
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={disabled || !query.trim()}
+                      onClick={() => run("visual", () => regenerateVisualAction(projectId, scene.id, { source: "PINTEREST", stockQuery: query }), `${label}: Pinterest search queued for the worker`)}
+                    >
+                      {spinner("visual", <Search />)} {scene.visualSource === "PINTEREST" ? "Find another Pin" : "Find on Pinterest"}
+                    </Button>
+                  )}
+                </div>
+                <PinterestStatus scene={scene} />
+              </div>
             ) : (
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <Input value={query} onChange={(e) => setQuery(e.target.value)} disabled={!editable || locked} placeholder="e.g. rainy city street" aria-label={`${label} stock search`} />
@@ -250,6 +273,27 @@ function ClipStatus({ scene }: { scene: StudioScene }) {
   return (
     <p className={cn("flex items-start gap-1.5 text-xs", scene.aiClipStatus === "FAILED" ? "text-destructive" : "text-muted-foreground")}>
       {scene.aiClipStatus === "QUEUED" || scene.aiClipStatus === "RUNNING" ? <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin" /> : null}
+      {text}
+    </p>
+  );
+}
+
+function PinterestStatus({ scene }: { scene: StudioScene }) {
+  const ours = scene.aiClipEngine === "PINTEREST";
+  const status = ours ? scene.aiClipStatus : null;
+  const text =
+    status === "QUEUED"
+      ? "Waiting for the Pinterest worker. Start cloud/pinterest/pinterest_source.py --worker if it isn't running."
+      : status === "RUNNING"
+        ? "The worker is searching Pinterest and downloading the first video Pin. The current visual stays until it's done."
+        : status === "FAILED"
+          ? `Pinterest search failed: ${scene.aiClipError ?? "unknown error"}`
+          : scene.visualSource === "PINTEREST"
+            ? "Using a Pinterest video. Short clips loop to cover the narration."
+            : "A worker outside Vercel searches Pinterest for this phrase and uses the first video Pin it can download.";
+  return (
+    <p className={cn("flex items-start gap-1.5 text-xs", status === "FAILED" ? "text-destructive" : "text-muted-foreground")}>
+      {status === "QUEUED" || status === "RUNNING" ? <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin" /> : null}
       {text}
     </p>
   );

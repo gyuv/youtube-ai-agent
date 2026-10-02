@@ -1,0 +1,4 @@
+# Pinterest video source (runs on a worker machine, not on Vercel).
+playwright>=1.47,<2   # then: python -m playwright install chromium
+yt-dlp>=2025.1.1
+requests>=2.32
