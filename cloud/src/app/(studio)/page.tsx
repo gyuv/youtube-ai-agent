@@ -1,7 +1,8 @@
-import { AlertTriangle, Bot, CalendarClock, Clapperboard, Cog, Lock, Plus, Radio, Youtube } from "lucide-react";
+import { AlertTriangle, Bot, CalendarClock, Clapperboard, Cog, Radio, Youtube } from "lucide-react";
 import Link from "next/link";
 import { AutomationSwitch } from "@/components/automation-switch";
 import { AutopilotPanel } from "@/components/autopilot-panel";
+import { MakeSlotButton } from "@/components/make-slot-button";
 import { PageHeader, timeAgo } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -19,7 +20,8 @@ type Row = DashboardData["projects"][number];
 const VIEWS = {
   active: { label: "In pipeline", match: (p: Row) => ACTIVE_STATUSES.includes(p.status) },
   attention: { label: "Needs attention", match: (p: Row) => p.status === ProjectStatus.FAILED || p.youtubeLocked },
-  published: { label: "Published", match: (p: Row) => p.status === ProjectStatus.PUBLISHED },
+  scheduled: { label: "Scheduled on YouTube", match: (p: Row) => Boolean(p.goesLiveAt) },
+  published: { label: "Live", match: (p: Row) => p.status === ProjectStatus.PUBLISHED && !p.goesLiveAt && !p.youtubeLocked },
   all: { label: "All", match: () => true },
 } as const;
 type View = keyof typeof VIEWS;
@@ -40,7 +42,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <Stat icon={<Clapperboard />} label="In progress" value={data.stats.inProgress} href="/?view=active" />
         <Stat icon={<Radio />} label="Rendering" value={data.stats.rendering} href="/?view=active" live={data.stats.rendering > 0} />
         <Stat icon={<AlertTriangle />} label="Needs attention" value={data.stats.needsAttention} href="/?view=attention" warn={data.stats.needsAttention > 0} />
-        <Stat icon={<Youtube />} label="Published, 30 days" value={data.stats.publishedThisMonth} href="/?view=published" />
+        <Stat
+          icon={<Youtube />}
+          label={data.stats.scheduledOnYouTube ? `Live, 30 days · ${data.stats.scheduledOnYouTube} scheduled` : "Live on YouTube, 30 days"}
+          value={data.stats.publishedThisMonth}
+          href={data.stats.scheduledOnYouTube ? "/?view=scheduled" : "/?view=published"}
+        />
       </div>
 
       <div className="mt-8 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -153,12 +160,7 @@ function ProjectRow({ project }: { project: Row }) {
       </TableCell>
       <TableCell>
         <div className="flex items-center gap-1.5">
-          <StatusBadge status={project.status} />
-          {project.youtubeLocked ? (
-            <span className="text-amber-600 dark:text-amber-300" title="YouTube kept this video private">
-              <Lock className="size-3.5" aria-label="Locked private on YouTube" />
-            </span>
-          ) : null}
+          <StatusBadge status={project.status} goesLiveAt={project.goesLiveAt} locked={project.youtubeLocked} timeZone={project.timeZone} />
         </div>
       </TableCell>
       <TableCell>
@@ -231,7 +233,11 @@ function ScheduleCard({ schedule }: { schedule: DashboardData["schedule"] }) {
                       )}
                       <div className="truncate text-xs text-muted-foreground">{entry.channel.name}</div>
                     </div>
-                    {entry.project ? <StatusBadge status={entry.project.status} /> : <Plus className="size-4 text-muted-foreground" />}
+                    {entry.project ? (
+                      <StatusBadge status={entry.project.status} goesLiveAt={entry.at} locked={entry.project.youtubeLocked} timeZone={entry.channel.postingTimezone} />
+                    ) : (
+                      <MakeSlotButton channelId={entry.channel.id} at={entry.at.toISOString()} />
+                    )}
                   </li>
                 ))}
               </ul>

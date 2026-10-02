@@ -47,12 +47,13 @@ export interface ScheduleProject {
   topic: string;
   status: ProjectStatus;
   scheduledFor: Date | null;
+  youtubeLocked?: boolean;
 }
 
 export interface ScheduleEntry {
   at: Date;
   channel: Pick<ScheduleChannel, "id" | "name" | "postingTimezone">;
-  project: Pick<ScheduleProject, "id" | "title" | "topic" | "status"> | null;
+  project: Pick<ScheduleProject, "id" | "title" | "topic" | "status" | "youtubeLocked"> | null;
   /** "slot": from the channel's cron; "custom": a project scheduled off-cron. */
   kind: "slot" | "custom";
 }

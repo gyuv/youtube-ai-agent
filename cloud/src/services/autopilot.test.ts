@@ -20,7 +20,7 @@ vi.mock("./publish", () => publish);
 vi.mock("./analytics", () => analytics);
 vi.mock("./labsAutomation", () => labs);
 
-import { MAX_AUTOPILOT_FAILURES, autopilotTick, createVideoNow } from "./autopilot";
+import { MAX_AUTOPILOT_FAILURES, autopilotTick, createVideoNow, createVideosAhead } from "./autopilot";
 
 const NOW = new Date("2026-09-29T00:00:00Z"); // Tuesday
 const CHANNEL = {
@@ -296,5 +296,40 @@ describe("Creator Labs automation", () => {
     const result = await autopilotTick(NOW);
     expect(result).toMatchObject({ action: "reviewed", more: true });
     expect(result.message).toContain("2 new topics");
+  });
+});
+
+describe("making future videos on request", () => {
+  it("makes the video for a specific open slot, however far ahead", async () => {
+    db.channel.findUnique.mockResolvedValue({ ...CHANNEL, topicBacklog: "Tax saving tips" });
+    db.videoProject.findMany.mockResolvedValue([]);
+    const at = new Date("2026-10-05T18:00:00Z"); // 6 days ahead, far outside the 36 h lead window
+    const created = await createVideoNow("c1", NOW, at);
+    expect(created.slot).toEqual(at);
+    expect(db.videoProject.create.mock.calls[0][0].data).toMatchObject({ scheduledFor: at, autopilot: true });
+  });
+
+  it("refuses a slot that already has a video, or has passed", async () => {
+    db.channel.findUnique.mockResolvedValue(CHANNEL);
+    const at = new Date("2026-10-05T18:00:00Z");
+    db.videoProject.findMany.mockResolvedValue([{ scheduledFor: at }]);
+    await expect(createVideoNow("c1", NOW, at)).rejects.toThrow(/already has a video/);
+    await expect(createVideoNow("c1", NOW, new Date("2026-09-28T18:00:00Z"))).rejects.toThrow(/already passed/);
+  });
+
+  it("makes one video per upcoming free slot", async () => {
+    db.channel.findUnique.mockResolvedValue({ ...CHANNEL, topicBacklog: "A topic one\nA topic two\nA topic three" });
+    const taken: Date[] = [];
+    db.videoProject.findMany.mockImplementation(async () => taken.map((scheduledFor) => ({ scheduledFor })));
+    db.videoProject.create.mockImplementation(async ({ data }) => {
+      taken.push(data.scheduledFor);
+      return { id: `p${taken.length}`, ...data };
+    });
+    db.channel.update.mockImplementation(async ({ data }) => Object.assign(CHANNEL_STATE, data));
+    const CHANNEL_STATE = { topicBacklog: "A topic one\nA topic two\nA topic three" };
+    db.channel.findUnique.mockImplementation(async () => ({ ...CHANNEL, ...CHANNEL_STATE }));
+    const created = await createVideosAhead("c1", 3, NOW);
+    expect(created.map((c) => c.slot?.toISOString())).toEqual(["2026-09-29T18:00:00.000Z", "2026-09-30T18:00:00.000Z", "2026-10-01T18:00:00.000Z"]);
+    expect(created.map((c) => c.topic)).toEqual(["A topic one", "A topic two", "A topic three"]);
   });
 });

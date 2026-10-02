@@ -26,11 +26,14 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
       },
     }),
     prisma.videoProject.groupBy({ by: ["status"], _count: { _all: true } }),
-    prisma.videoProject.count({ where: { status: ProjectStatus.PUBLISHED, publishedAt: { gte: monthAgo } } }),
+    // Live means uploaded and past its go-live time; scheduled uploads are counted separately.
+    prisma.videoProject.count({
+      where: { status: ProjectStatus.PUBLISHED, youtubeLocked: false, publishedAt: { gte: monthAgo }, OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }] },
+    }),
     prisma.videoProject.count({ where: { status: ProjectStatus.PUBLISHED, youtubeLocked: true } }),
     prisma.videoProject.findMany({
       where: { scheduledFor: { gte: now } },
-      select: { id: true, channelId: true, title: true, topic: true, status: true, scheduledFor: true },
+      select: { id: true, channelId: true, title: true, topic: true, status: true, scheduledFor: true, youtubeLocked: true },
     }),
     recentAutopilotEvents(8),
   ]);
@@ -46,6 +49,7 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
       // Failed videos, and published ones YouTube kept private.
       needsAttention: count(ProjectStatus.FAILED) + lockedPrivate,
       publishedThisMonth,
+      scheduledOnYouTube: projects.filter((p) => p.status === ProjectStatus.PUBLISHED && !p.youtubeLocked && p.scheduledFor && p.scheduledFor > now).length,
     },
     projects: projects.map((p) => ({
       id: p.id,
@@ -60,6 +64,8 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
       lastError: p.lastError,
       autopilot: p.autopilot,
       youtubeLocked: p.status === ProjectStatus.PUBLISHED && p.youtubeLocked,
+      // On YouTube but held until its slot.
+      goesLiveAt: p.status === ProjectStatus.PUBLISHED && !p.youtubeLocked && p.scheduledFor && p.scheduledFor > now ? p.scheduledFor : null,
       scenesReady: p.scenes.filter(sceneHasAssets).length,
       sceneCount: p.scenes.length,
     })),

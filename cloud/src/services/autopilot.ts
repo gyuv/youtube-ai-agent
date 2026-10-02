@@ -426,7 +426,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
  * rendered) and the next topic, then the autopilot carries it through script, voice, visuals and
  * render. Channels without the autopilot get the project only; the studio opens it to finish.
  */
-export async function createVideoNow(channelId: string, now: Date = new Date()) {
+export async function createVideoNow(channelId: string, now: Date = new Date(), at?: Date) {
   const channel = await prisma.channel.findUnique({ where: { id: channelId } });
   if (!channel) throw new PipelineError("NOT_FOUND", `Channel ${channelId} not found.`);
   if (!channel.isActive) throw new PipelineError("CONFLICT", `Channel "${channel.name}" is paused. Turn it on in Channels first.`);
@@ -435,7 +435,15 @@ export async function createVideoNow(channelId: string, now: Date = new Date()) 
     where: { channelId, scheduledFor: { gte: now } },
     select: { scheduledFor: true },
   });
-  const slot = firstFreeSlot(channel, taken.map((p) => p.scheduledFor!), now);
+  let slot: Date | null;
+  if (at) {
+    // A specific slot picked on the dashboard's schedule.
+    if (at.getTime() <= now.getTime()) throw new PipelineError("CONFLICT", "That slot has already passed.");
+    if (taken.some((p) => Math.abs(p.scheduledFor!.getTime() - at.getTime()) < 60_000)) throw new PipelineError("CONFLICT", "That slot already has a video.");
+    slot = at;
+  } else {
+    slot = firstFreeSlot(channel, taken.map((p) => p.scheduledFor!), now);
+  }
   const { topic, source } = await nextTopic(channel);
   const project = await prisma.videoProject.create({
     data: {
@@ -449,7 +457,14 @@ export async function createVideoNow(channelId: string, now: Date = new Date()) 
   });
   const when = slot ? `for ${formatSlot(slot, channel.postingTimezone)}` : "to publish once rendered";
   await log("info", "planned", `Created "${topic}" (from ${source}) ${when} on ${channel.name}, on request.`, { channelId, projectId: project.id });
-  return { projectId: project.id, topic, autopilot: channel.autopilot };
+  return { projectId: project.id, topic, autopilot: channel.autopilot, slot };
+}
+
+/** "Make videos ahead": one video for each of the next `count` free posting slots, made right away. */
+export async function createVideosAhead(channelId: string, count: number, now: Date = new Date()) {
+  const created: Awaited<ReturnType<typeof createVideoNow>>[] = [];
+  for (let i = 0; i < Math.min(Math.max(count, 1), 14); i++) created.push(await createVideoNow(channelId, now));
+  return created;
 }
 
 export async function recentAutopilotEvents(limit = 12) {
