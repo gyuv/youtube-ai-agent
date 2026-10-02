@@ -15,6 +15,7 @@ import {
   type SceneFillResult,
 } from "@/services/pipeline";
 import { createProject, deleteProject, setChannelAutoPublish, setSceneLocked, updateProjectMetadata } from "@/services/projects";
+import { queueMuapiClip } from "@/services/muapi";
 import { publishRenderedProject } from "@/services/publish";
 import { cancelSceneClip, queueSceneClip } from "@/services/wan2gp";
 import { checkYouTubeVisibility } from "@/services/youtube";
@@ -161,10 +162,18 @@ export async function setSceneLockedAction(projectId: string, sceneId: string, l
   return result;
 }
 
-export async function queueAiClipAction(projectId: string, sceneId: string, prompt: string): Promise<ActionResult> {
+export async function queueAiClipAction(
+  projectId: string,
+  sceneId: string,
+  prompt: string,
+  engine: "WAN2GP" | "MUAPI" = "WAN2GP",
+  model?: string,
+): Promise<ActionResult> {
   await requireOperator();
   const result = await toActionResult(async () => {
-    await queueSceneClip(Id.parse(sceneId), z.string().max(1500).parse(prompt));
+    const text = z.string().max(1500).parse(prompt);
+    if (z.enum(["WAN2GP", "MUAPI"]).parse(engine) === "MUAPI") await queueMuapiClip(Id.parse(sceneId), text, z.string().max(80).optional().parse(model));
+    else await queueSceneClip(Id.parse(sceneId), text);
     return null;
   });
   refresh(projectId);

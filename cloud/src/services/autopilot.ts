@@ -4,6 +4,7 @@ import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { analyzeChannel, findChannelToAnalyze } from "./analytics";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets } from "./pipeline";
+import { pollMuapiClips } from "./muapi";
 import { findVideoToAutoPublish, publishRenderedProject } from "./publish";
 import { firstFreeSlot, formatSlot, isValidCron } from "./schedule";
 import { proposeTopic } from "./topicPlanner";
@@ -226,6 +227,7 @@ async function nextTopic(channel: AutopilotChannel): Promise<{ topic: string; so
 
 export async function autopilotTick(now: Date = new Date()): Promise<TickResult> {
   const swept = await sweepStaleRenders(now);
+  await pollMuapiClips(undefined, now).catch((error) => console.error("Muapi poll failed", error));
 
   // Rendered videos waiting for YouTube go first: on auto-publish channels they shouldn't sit idle,
   // whether or not the channel also runs the autopilot.

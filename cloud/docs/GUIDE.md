@@ -405,6 +405,12 @@ yourself in YouTube Studio if you want it public.
 - **Check visibility** on a published video asks YouTube for its current visibility (after your
   audit is approved, for example).
 - **Channels**: change the schedule, style or voice at any time. New videos use the new settings.
+- **Muapi AI video (optional, paid)**: add `MUAPI_API_KEY` in Vercel. In a scene's *Visual → AI video*
+  tab, pick the engine **Muapi** and a model (Wan 2.2 cheapest; Seedance, Kling, Hailuo, Veo 3 Fast),
+  then **Animate with Muapi**. It animates the scene's image into a 5-second clip in 1-5 minutes; the
+  page collects it by itself and the renderer loops it to the narration. Muapi is the engine behind
+  Open-Higgsfield-AI and charges per clip from your Muapi credits. Wan2GP on Colab stays the free
+  option.
 - **Script Lab, Edit Lab and Growth Lab** (top menu): the eleven tools from
   [youtube-agent-skill](https://github.com/Jakeschincariol/youtube-agent-skill) (MIT), adapted to the
   channel you pick: its niche, audience, style guide, learned lessons and real video stats.

@@ -51,7 +51,14 @@ VOICE_RATE = os.environ.get("KZ_VOICE_RATE", "-10%")
 
 GEMINI_MODELS = [m for m in (os.environ.get("GEMINI_MODEL", "gemini-3.7-flash"), os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")) if m]
 # Image providers, tried in order. Pollinations is free, keyless and has no monthly cap.
-IMAGE_PROVIDERS = [p.strip() for p in os.environ.get("KZ_IMAGE_PROVIDERS", "pollinations,cloudflare,huggingface").split(",") if p.strip()]
+# Muapi (paid, when MUAPI_API_KEY is set) first, then the free ones. Pollinations goes last: it
+# refused GitHub's runners in testing.
+IMAGE_PROVIDERS = [p.strip() for p in os.environ.get("KZ_IMAGE_PROVIDERS", "muapi,cloudflare,huggingface,pollinations").split(",") if p.strip()]
+MUAPI_API = "https://api.muapi.ai/api/v1"
+MUAPI_IMAGE_MODEL = os.environ.get("KZ_MUAPI_IMAGE_MODEL", "flux-schnell-image")
+# Set to an image-to-video model (e.g. wan2.2-image-to-video, seedance-lite-i2v, kling-v2.1-standard-i2v)
+# to animate every scene with Muapi instead of the Ken Burns zoom. Paid per clip.
+MUAPI_VIDEO_MODEL = os.environ.get("KZ_MUAPI_VIDEO_MODEL", "").strip()
 HF_MODELS = [m.strip() for m in os.environ.get("HF_IMAGE_MODELS", "stabilityai/stable-diffusion-xl-base-1.0,black-forest-labs/FLUX.1-schnell").split(",") if m.strip()]
 
 IMAGE_SUFFIX = (
@@ -92,6 +99,10 @@ class Scene:
     @property
     def image(self) -> Path:
         return WORK / f"scene_{self.index}.jpg"
+
+    @property
+    def clip(self) -> Path:
+        return WORK / f"scene_{self.index}.mp4"
 
     @property
     def audio(self) -> Path:
@@ -374,8 +385,98 @@ def cloudflare_image(prompt: str, seed: int) -> Image.Image:
     return Image.open(io.BytesIO(base64.b64decode(res.json()["result"]["image"])))
 
 
+# ── Muapi.ai (the engine behind Open-Higgsfield-AI; paid per generation) ──
+
+
+def _muapi_key() -> str:
+    return os.environ.get("MUAPI_API_KEY", "").strip()
+
+
+def _muapi_result(data: dict) -> str | None:
+    outputs = data.get("outputs") or []
+    url = (outputs[0] if outputs else None) or data.get("url") or (data.get("output") or {}).get("url")
+    return url if isinstance(url, str) else None
+
+
+def muapi_submit(endpoint: str, payload: dict) -> dict:
+    res = requests.post(f"{MUAPI_API}/{endpoint}", json=payload, headers={"x-api-key": _muapi_key()}, timeout=60)
+    if res.status_code == 402:
+        raise RuntimeError("Muapi: out of credits")
+    res.raise_for_status()
+    return res.json()
+
+
+def muapi_wait(data: dict, timeout_s: float = 600) -> str:
+    """Poll a Muapi prediction until it has an output URL."""
+    request_id = data.get("request_id") or data.get("id")
+    if not request_id:
+        url = _muapi_result(data)
+        if url:
+            return url
+        raise RuntimeError(f"Muapi returned no request id: {str(data)[:160]}")
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        time.sleep(4)
+        res = requests.get(f"{MUAPI_API}/predictions/{request_id}/result", headers={"x-api-key": _muapi_key()}, timeout=60)
+        if res.status_code >= 500:
+            continue
+        res.raise_for_status()
+        body = res.json()
+        status = str(body.get("status", "")).lower()
+        if status in {"completed", "succeeded", "success"}:
+            url = _muapi_result(body)
+            if url:
+                return url
+        if status in {"failed", "error"}:
+            raise RuntimeError(f"Muapi job failed: {body.get('error')}")
+    raise RuntimeError("Muapi job timed out")
+
+
+def muapi_upload(path: Path) -> str:
+    with path.open("rb") as fh:
+        res = requests.post(f"{MUAPI_API}/upload_file", files={"file": (path.name, fh)}, headers={"x-api-key": _muapi_key()}, timeout=120)
+    res.raise_for_status()
+    body = res.json()
+    url = body.get("url") or body.get("file_url") or (body.get("data") or {}).get("url")
+    if not url:
+        raise RuntimeError("Muapi upload returned no URL")
+    return url
+
+
+def muapi_image(prompt: str, seed: int) -> Image.Image:
+    data = muapi_submit(MUAPI_IMAGE_MODEL, {"prompt": prompt[:2000], "aspect_ratio": "16:9", "num_images": 1, "seed": seed})
+    res = requests.get(muapi_wait(data, 300), timeout=120)
+    res.raise_for_status()
+    return Image.open(io.BytesIO(res.content))
+
+
+def animate_scenes(scenes: list[Scene]) -> None:
+    """Optional: turn every scene still into a 5 s Muapi clip. Jobs run in parallel on Muapi."""
+    if not (MUAPI_VIDEO_MODEL and _muapi_key()):
+        return
+    jobs = {}
+    for scene in scenes:
+        try:
+            image_url = muapi_upload(scene.image)
+            motion = f"{scene.image_prompt}. Gentle, playful, slow motion; the cat and the puppy move cheerfully. Bright, cute 3D animation."
+            jobs[scene.index] = (scene, muapi_submit(MUAPI_VIDEO_MODEL, {"prompt": motion[:1500], "image_url": image_url, "aspect_ratio": "16:9", "duration": 5, "resolution": "720p"}))
+        except Exception as error:
+            log(f"  Muapi animation not started for scene {scene.index}: {str(error)[:160]}")
+            if "credits" in str(error):
+                break
+    for scene, data in jobs.values():
+        try:
+            res = requests.get(muapi_wait(data, 900), timeout=180)
+            res.raise_for_status()
+            scene.clip.write_bytes(res.content)
+            log(f"  scene {scene.index}: animated with {MUAPI_VIDEO_MODEL}")
+        except Exception as error:
+            log(f"  scene {scene.index}: Muapi animation failed, using the zoom instead ({str(error)[:120]})")
+
+
 def available_image_providers():
     makers = {
+        "muapi": (muapi_image, bool(_muapi_key())),
         "pollinations": (pollinations_image, True),
         "cloudflare": (cloudflare_image, bool(os.environ.get("CLOUDFLARE_ACCOUNT_ID") and os.environ.get("CLOUDFLARE_API_TOKEN"))),
         "huggingface": (huggingface_image, bool(os.environ.get("HF_TOKEN", "").strip())),
@@ -464,6 +565,7 @@ def generate_assets(scenes: list[Scene]) -> None:
         log(f"Scene {scene.index}: image + voice")
         generate_image(scene, seed)
         generate_audio(scene)
+    animate_scenes(scenes)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -536,6 +638,18 @@ def synth_music(path: Path, seconds: float = 32.0, rate: int = 44100) -> Path:
     return path
 
 
+def animated_clip(path: Path, duration: float):
+    """A Muapi clip scaled to cover the frame, looped or trimmed to the narration, without its own sound."""
+    from moviepy import VideoFileClip
+    from moviepy.video.fx import Loop
+
+    clip = VideoFileClip(str(path), audio=False)
+    scale = max(VIDEO_SIZE[0] / clip.w, VIDEO_SIZE[1] / clip.h)
+    clip = clip.resized(scale).cropped(x_center=clip.w * scale / 2, y_center=clip.h * scale / 2, width=VIDEO_SIZE[0], height=VIDEO_SIZE[1])
+    clip = clip.with_effects([Loop(duration=duration)]) if clip.duration < duration else clip.subclipped(0, duration)
+    return clip.with_duration(duration)
+
+
 def pick_music() -> Path:
     tracks = sorted(p for p in MUSIC_DIR.glob("*") if p.suffix.lower() in {".mp3", ".wav", ".m4a", ".ogg"})
     return random.choice(tracks) if tracks else synth_music(WORK / "music_box.wav")
@@ -549,7 +663,8 @@ def render_video(scenes: list[Scene], output: Path) -> Path:
     for scene in scenes:
         voice = AudioFileClip(str(scene.audio))
         duration = voice.duration + SCENE_PAD_SECONDS
-        clips.append(ken_burns(scene.image, duration).with_audio(voice))
+        visual = animated_clip(scene.clip, duration) if scene.clip.exists() else ken_burns(scene.image, duration)
+        clips.append(visual.with_audio(voice))
         log(f"Scene {scene.index}: {duration:.1f}s")
 
     video = concatenate_videoclips(clips, method="chain")

@@ -13,7 +13,9 @@ export interface StudioScene {
   stockQuery: string | null;
   imageUrl: string | null;
   videoClipUrl: string | null;
-  visualSource: "POLLINATIONS" | "PEXELS" | "UPLOAD" | "WAN2GP";
+  visualSource: "POLLINATIONS" | "PEXELS" | "UPLOAD" | "WAN2GP" | "MUAPI";
+  /** Which engine is making the AI clip ("WAN2GP" or "MUAPI"), while one is requested. */
+  aiClipEngine: string | null;
   /** Wan2GP clip request, handled by the GPU worker. Null when there is none. */
   aiClipStatus: "QUEUED" | "RUNNING" | "FAILED" | null;
   aiClipPrompt: string | null;
