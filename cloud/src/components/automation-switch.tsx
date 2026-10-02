@@ -28,7 +28,7 @@ export function AutomationSwitch({ channels }: { channels: AutomationChannel[] }
             <Zap className="size-4" /> Full automation
           </CardTitle>
           <CardDescription className="mt-1.5">
-            On: makes each video before its slot, posts it publicly on YouTube, and learns from views to improve the next ones. Off: stops
+            On: makes each video before its slot, packages it with Creator Labs (title, SEO, chapters), posts it publicly on YouTube, reviews growth weekly and learns from views to improve the next ones. Off: stops
             making and posting.
           </CardDescription>
         </div>

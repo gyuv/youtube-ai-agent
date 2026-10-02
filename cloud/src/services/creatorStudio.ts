@@ -170,6 +170,8 @@ export interface ToolRun {
   data: Record<string, unknown>;
   /** What the studio can write back to a video. */
   apply?: { title?: string; description?: string; tags?: string[]; chapters?: string };
+  /** Next-video ideas from the plan, viral and audit tools. */
+  topics?: string[];
 }
 
 const transcriptCues = (raw: string | undefined): Cue[] => (raw?.trim() ? parseTranscript(raw.slice(0, MAX_INPUT)) : []);
@@ -222,6 +224,7 @@ export async function computeToolData(tool: CreatorTool, input: Record<string, s
 const ResultSchema = z.object({
   markdown: z.string().min(20),
   hooks: z.array(z.string()).optional(),
+  topics: z.array(z.string()).optional(),
   apply: z
     .object({ title: z.string().optional(), description: z.string().optional(), tags: z.array(z.string()).optional(), chapters: z.string().optional() })
     .optional(),
@@ -244,6 +247,9 @@ export function buildToolPrompt(tool: CreatorTool, input: Record<string, string>
     "Do not ask the user follow-up questions; make the best version with what is given and note any missing input at the end.",
     "Never invent statistics, results or sources. Write the result as clean GitHub Markdown in the `markdown` field.",
     tool.id === "yt-script" ? "Put your five candidate hooks, verbatim, in the `hooks` array as well." : "",
+    ["yt-plan", "yt-viral", "yt-audit"].includes(tool.id)
+      ? "Also put up to 7 concrete next video topics for this channel in `topics`: each one line, phrased like a search, never repeating a recent video."
+      : "",
     tool.applies ? APPLY_NOTE[tool.applies] : "",
     "",
     "=== SKILL ===",
@@ -298,7 +304,7 @@ export async function runCreatorTool(toolId: string, channelId: string, rawInput
     data.hookScores = result.hooks.map(scoreHook).sort((a, b) => b.verdict - a.verdict);
   }
   if (tool.id === "yt-package" && result.apply?.title) data.recommendedTitleLint = lintTitle(result.apply.title, input.thumb);
-  return { markdown: result.markdown, data, apply: tool.applies ? result.apply : undefined };
+  return { markdown: result.markdown, data, apply: tool.applies ? result.apply : undefined, topics: result.topics?.map((t) => t.trim()).filter(Boolean) };
 }
 
 /** Write a tool's result onto one of the channel's videos (not once it's on YouTube). */

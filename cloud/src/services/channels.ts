@@ -41,6 +41,7 @@ export const ChannelInputSchema = z
   autopilotVisualSource: z.enum(["POLLINATIONS", "PEXELS"]).default("POLLINATIONS"),
   topicBacklog: optionalText(10_000),
   learnFromAnalytics: checkbox,
+  autoLabs: checkbox,
 })
   .refine((c) => !c.autopilot || c.postingCron, {
     message: "Autopilot fills posting slots, so it needs a posting schedule",
@@ -109,6 +110,7 @@ export async function setFullAutomation(id: string, enabled: boolean) {
       autoPublish: true,
       autopilotReview: false,
       learnFromAnalytics: true,
+      autoLabs: true,
       // Only public videos can be scheduled for their slot; others would go live as soon as rendered.
       defaultPrivacy: "PUBLIC",
       postingCron: channel.postingCron && isValidCron(channel.postingCron) ? channel.postingCron : DEFAULT_AUTOMATION_CRON,

@@ -3,6 +3,7 @@ import { ProjectStatus, VisualSource } from "@/generated/prisma/enums";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { analyzeChannel, findChannelToAnalyze } from "./analytics";
+import { findChannelForGrowthReview, packageProject, runGrowthReview } from "./labsAutomation";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets } from "./pipeline";
 import { pollMuapiClips } from "./muapi";
 import { findVideoToAutoPublish, publishRenderedProject } from "./publish";
@@ -34,7 +35,7 @@ export const PLANNING_PAUSE_MS = 12 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const VERIFY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type TickAction = "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "error" | "idle";
+export type TickAction = "packaged" | "reviewed" | "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "error" | "idle";
 
 export interface TickResult {
   action: TickAction;
@@ -64,9 +65,11 @@ type AutopilotChannel = Pick<
   | "topicBacklog"
   | "learnFromAnalytics"
   | "performanceNotes"
+  | "autoLabs"
 >;
 
 type WorkProject = Pick<VideoProject, "id" | "channelId" | "status" | "topic" | "title" | "autopilotFailures" | "scheduledFor"> & {
+  labsAppliedAt?: Date | null;
   scenes: Pick<Scene, "id" | "sceneIndex" | "locked" | "voiceAudioUrl" | "imageUrl" | "videoClipUrl" | "durationSeconds">[];
 };
 
@@ -128,6 +131,8 @@ function findWork(projects: WorkProject[], channels: Map<string, AutopilotChanne
   const complete = (p: WorkProject) => p.scenes.length > 0 && p.scenes.every(sceneHasAssets);
   for (const p of projects) {
     const channel = channels.get(p.channelId)!;
+    // Creator Labs package the video (title, SEO, chapters) once, before it renders.
+    if (p.status === ProjectStatus.ASSETS_READY && channel.autoLabs && !p.labsAppliedAt) return { kind: "package" as const, project: p, channel };
     if (p.status === ProjectStatus.ASSETS_READY && !channel.autopilotReview) return { kind: "dispatch" as const, project: p, channel };
     // A failed render (not a failed script or asset step) is retried while attempts remain.
     if (p.status === ProjectStatus.FAILED && !channel.autopilotReview && complete(p)) return { kind: "dispatch" as const, project: p, channel };
@@ -265,6 +270,16 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
     }
   }
 
+  // Weekly per channel: Growth Lab's audit, viral and plan; their topic ideas join the backlog.
+  const toReview = await findChannelForGrowthReview(now);
+  if (toReview) {
+    const ids = { channelId: toReview.id };
+    const { ran, failed, added } = await runGrowthReview(toReview, now);
+    const message = `${toReview.name}: weekly Growth Lab review (${ran.join(", ") || "nothing ran"})${added.length ? `; ${added.length} new topic${added.length === 1 ? "" : "s"} added to the backlog` : ""}${failed.length ? `; skipped ${failed.join("; ").slice(0, 200)}` : ""}.`;
+    await log(ran.length ? "info" : "error", "reviewed", message, ids);
+    return { action: "reviewed", message, more: true, swept, ...ids };
+  }
+
   const channels = await prisma.channel.findMany({ where: { autopilot: true, isActive: true } });
   if (channels.length === 0) return { action: "idle", message: "Autopilot is off on every channel.", more: false, swept };
   const byId = new Map(channels.map((c) => [c.id, c]));
@@ -285,6 +300,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       title: true,
       autopilotFailures: true,
       scheduledFor: true,
+      labsAppliedAt: true,
       scenes: {
         orderBy: { sceneIndex: "asc" },
         select: { id: true, sceneIndex: true, locked: true, voiceAudioUrl: true, imageUrl: true, videoClipUrl: true, durationSeconds: true },
@@ -297,6 +313,12 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
     const { project, channel } = work;
     const ids = { projectId: project.id, channelId: channel.id };
     try {
+      if (work.kind === "package") {
+        const { applied, failed } = await packageProject(project.id, now);
+        const message = `${label(project)}: Creator Labs applied ${applied.join(", ") || "nothing"}${failed.length ? ` (skipped: ${failed.join("; ").slice(0, 300)})` : ""}.`;
+        await log(failed.length && !applied.length ? "error" : "info", "packaged", message, ids);
+        return { action: "packaged", message, more: true, swept, ...ids };
+      }
       if (work.kind === "dispatch") {
         const retry = project.status === ProjectStatus.FAILED;
         await dispatchCloudRender(project.id);
@@ -318,7 +340,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       await log("info", "scripted", message, ids);
       return { action: "scripted", message, more: true, swept, ...ids };
     } catch (error) {
-      const step = work.kind === "dispatch" ? "Render dispatch" : work.kind === "fill" ? "Asset generation" : "Script writing";
+      const step = work.kind === "dispatch" ? "Render dispatch" : work.kind === "fill" ? "Asset generation" : work.kind === "package" ? "Creator Labs" : "Script writing";
       const message = await recordFailure(project, step, error);
       // Other projects may still progress; failure caps keep this from looping forever.
       return { action: "error", message, more: true, swept, ...ids };

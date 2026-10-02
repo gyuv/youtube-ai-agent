@@ -9,6 +9,7 @@ const pipeline = vi.hoisted(() => ({ dispatchCloudRender: vi.fn(), fillSceneAsse
 const planner = vi.hoisted(() => ({ proposeTopic: vi.fn() }));
 const youtube = vi.hoisted(() => ({ checkYouTubeVisibility: vi.fn() }));
 const analytics = vi.hoisted(() => ({ findChannelToAnalyze: vi.fn(), analyzeChannel: vi.fn() }));
+const labs = vi.hoisted(() => ({ findChannelForGrowthReview: vi.fn(), runGrowthReview: vi.fn(), packageProject: vi.fn() }));
 const publish = vi.hoisted(() => ({ findVideoToAutoPublish: vi.fn(), publishRenderedProject: vi.fn() }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
@@ -17,6 +18,7 @@ vi.mock("./topicPlanner", () => planner);
 vi.mock("./youtube", () => youtube);
 vi.mock("./publish", () => publish);
 vi.mock("./analytics", () => analytics);
+vi.mock("./labsAutomation", () => labs);
 
 import { MAX_AUTOPILOT_FAILURES, autopilotTick, createVideoNow } from "./autopilot";
 
@@ -73,12 +75,13 @@ function projectsQuery({
 }
 
 beforeEach(() => {
-  for (const group of [...Object.values(db), pipeline, planner, youtube, publish, analytics]) for (const fn of Object.values(group)) fn.mockReset();
+  for (const group of [...Object.values(db), pipeline, planner, youtube, publish, analytics, labs]) for (const fn of Object.values(group)) fn.mockReset();
   db.channel.findMany.mockResolvedValue([CHANNEL]);
   db.videoProject.create.mockImplementation(async ({ data }) => ({ id: "new1", ...data }));
   projectsQuery({});
   publish.findVideoToAutoPublish.mockResolvedValue(null);
   analytics.findChannelToAnalyze.mockResolvedValue(null);
+  labs.findChannelForGrowthReview.mockResolvedValue(null);
 });
 
 describe("auto-publish catch-up", () => {
@@ -267,5 +270,31 @@ describe("daily performance analysis", () => {
     const result = await autopilotTick(NOW);
     expect(result).toMatchObject({ action: "analyzed", more: true, channelId: "c1" });
     expect(result.message).toContain("lessons updated");
+  });
+});
+
+describe("Creator Labs automation", () => {
+  it("packages a finished video (title, SEO, chapters) before dispatching it", async () => {
+    db.channel.findMany.mockResolvedValue([{ ...CHANNEL, autoLabs: true }]);
+    projectsQuery({ work: [project({ status: "ASSETS_READY", labsAppliedAt: null })] });
+    labs.packageProject.mockResolvedValue({ applied: ["title", "SEO"], failed: [] });
+    const result = await autopilotTick(NOW);
+    expect(result.action).toBe("packaged");
+    expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
+  });
+
+  it("dispatches once the video is packaged", async () => {
+    db.channel.findMany.mockResolvedValue([{ ...CHANNEL, autoLabs: true }]);
+    projectsQuery({ work: [project({ status: "ASSETS_READY", labsAppliedAt: NOW })] });
+    pipeline.dispatchCloudRender.mockResolvedValue({});
+    expect((await autopilotTick(NOW)).action).toBe("dispatched");
+  });
+
+  it("runs the weekly growth review and reports new backlog topics", async () => {
+    labs.findChannelForGrowthReview.mockResolvedValue({ ...CHANNEL, autoLabs: true });
+    labs.runGrowthReview.mockResolvedValue({ ran: ["yt-audit", "yt-plan"], failed: [], added: ["Topic A", "Topic B"] });
+    const result = await autopilotTick(NOW);
+    expect(result).toMatchObject({ action: "reviewed", more: true });
+    expect(result.message).toContain("2 new topics");
   });
 });

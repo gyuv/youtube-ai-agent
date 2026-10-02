@@ -101,10 +101,14 @@ model Channel {
   topicBacklog          String?      @db.Text // one topic per line, used before Gemini ideas
   // Performance learning: Gemini's lessons from this channel's YouTube stats, fed into new topics and scripts.
   learnFromAnalytics    Boolean      @default(true)
+  // Creator Labs on autopilot: package each video before render, weekly growth review.
+  autoLabs              Boolean      @default(true)
+  growthReviewAt        DateTime?
   performanceNotes      String?      @db.Text
   performanceNotesAt    DateTime?
 
   projects VideoProject[]
+  labReports LabReport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -148,6 +152,7 @@ model VideoProject {
   publishedAt    DateTime?
   // A studio/autopilot publish of an already-rendered video started; guards double uploads.
   publishStartedAt DateTime?
+  labsAppliedAt    DateTime? // Script/Edit Lab packaging (title, SEO, chapters) applied automatically
   // YouTube reported the upload as private although it should be (or become) visible. Unaudited
   // Google Cloud projects get every API upload locked private until the YouTube API audit passes.
   youtubeLocked    Boolean   @default(false)
@@ -224,4 +229,20 @@ model AutopilotEvent {
   projectId String?
 
   @@index([createdAt])
+}
+
+/// A Creator Lab result, from a manual run or the autopilot (packaging, weekly growth review).
+model LabReport {
+  id        String   @id @default(cuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  projectId String?
+  toolId    String // e.g. "yt-package"
+  automatic Boolean  @default(true)
+  summary   String   @db.Text // one line for lists
+  markdown  String   @db.Text
+  data      Json?
+  createdAt DateTime @default(now())
+
+  @@index([channelId, createdAt])
 }
