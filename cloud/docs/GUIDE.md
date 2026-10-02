@@ -488,6 +488,60 @@ tunnel or a public link.
 - If a scene says *Wan2GP failed*, the error comes from the worker (often "CUDA out of memory": lower
   the frames or steps in the notebook's Settings cell). Click **Queue AI video** to try again.
 
+### Video Pins from Pinterest (optional)
+
+A small scraper on your own computer searches Pinterest for a scene and uploads the first video
+Pin it finds. Like Wan2GP, it collects work from your studio, so Lumen never connects to it.
+
+**One-time setup**
+1. Apply the database migration that adds Pinterest as a visual source. If your Vercel Build
+   Command runs `npx prisma migrate deploy` (see [section 5](#5-vercel-put-the-studio-online)),
+   redeploying production does it for you. Otherwise run it yourself from the `cloud` folder, with
+   `DIRECT_URL` set to your Supabase **session** connection string (port 5432, not the 6543
+   pooler):
+   ```
+   cd cloud
+   npx prisma migrate deploy
+   ```
+   Until this runs, every Pinterest request fails.
+2. Create a secret of 32+ random characters and add it in Vercel as `PINTEREST_WORKER_SECRET`, then
+   redeploy.
+3. Install Python 3.10 or newer (on Windows, tick *Add Python to PATH*), then:
+   ```
+   git clone https://github.com/gyuv/youtube-ai-agent.git
+   cd youtube-ai-agent/cloud/pinterest
+   pip install -r requirements.txt
+   python -m playwright install chromium
+   ```
+4. Test the scraper on its own: `python pinterest_source.py "ocean waves at sunset"`. It prints
+   the path of a downloaded `.mp4`. If it says *No downloadable video Pin found*, try another
+   phrase. If it fails every time, Pinterest may have changed its page.
+
+**Each time you want Pinterest clips**
+1. Start the worker with your production URL and the same secret as in Vercel.
+   Mac / Linux:
+   ```
+   export LUMEN_URL="https://<your-production-domain>"
+   export PINTEREST_WORKER_SECRET="<same value as in Vercel>"
+   python pinterest_source.py --worker
+   ```
+   Windows (PowerShell):
+   ```
+   $env:LUMEN_URL = "https://<your-production-domain>"
+   $env:PINTEREST_WORKER_SECRET = "<same value as in Vercel>"
+   python pinterest_source.py --worker
+   ```
+   It prints `Polling https://… for Pinterest searches.` Leave the window open.
+2. In a scene's *Pinterest* tab, click **Find on Pinterest**. The worker logs
+   `searching Pinterest for '…'`, then `uploaded …`.
+
+**If something goes wrong**
+- *Lumen rejected PINTEREST_WORKER_SECRET*: the value doesn't match Vercel's, or you haven't
+  redeployed since setting it.
+- A 503 error: the secret isn't set in Vercel, or it's shorter than 32 characters.
+- Nothing happens: no scene is queued yet. Click **Find on Pinterest** on a scene.
+- Requests fail with a database error: the migration in step 1 hasn't been applied.
+
 ## 13. Limits of the free tiers
 
 | Limit | What it means for you |
