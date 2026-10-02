@@ -77,6 +77,7 @@ export default async function StudioPage({ params, searchParams }: Params) {
     };
   });
 
+  const renderedAt = new Date();
   const editable = EDITABLE_STATUSES.includes(project.status);
   const inFlight = IN_FLIGHT_STATUSES.includes(project.status);
   // Wan2GP clips arrive from the GPU worker on their own; poll so they show up without a reload.
@@ -112,7 +113,12 @@ export default async function StudioPage({ params, searchParams }: Params) {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <StatusBadge status={project.status} />
+            <StatusBadge
+              status={project.status}
+              locked={project.youtubeLocked}
+              goesLiveAt={project.scheduledFor && project.scheduledFor > renderedAt ? project.scheduledFor : null}
+              timeZone={project.channel.postingTimezone}
+            />
             {project.autopilot ? (
               <span className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium" title="Created and advanced by the autopilot">
                 <Bot className="size-3" /> Autopilot

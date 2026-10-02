@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { createVideoNowAction, runAutopilotNowAction } from "@/app/(studio)/actions";
+import { createVideosAheadAction, runAutopilotNowAction } from "@/app/(studio)/actions";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form-controls";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,19 +32,22 @@ export function AutopilotPanel({ channelsOn, events, channels }: { channelsOn: n
   const [creating, startCreate] = useTransition();
   const [channelId, setChannelId] = useState(channels.find((c) => c.autopilot)?.id ?? channels[0]?.id ?? "");
 
+  const [count, setCount] = useState(1);
+
   const createNow = () =>
     startCreate(async () => {
-      const result = await createVideoNowAction(channelId);
+      const result = await createVideosAheadAction(channelId, count);
       if (!result.ok) return void toast.error(result.error);
-      const { projectId, topic, autopilot, runError } = result.data;
+      const { projectIds, topics, autopilot, runError } = result.data;
+      const what = topics.length === 1 ? `"${topics[0]}"` : `${topics.length} videos`;
       if (!autopilot) {
-        // No autopilot on this channel: open the video and write its script right away.
-        toast.success(`Created "${topic}". Writing the script…`);
-        router.push(`/projects/${projectId}?autoscript=1`);
+        // No autopilot on this channel: open the (first) video and write its script right away.
+        toast.success(`Created ${what}. Writing the script…`);
+        router.push(`/projects/${projectIds[0]}?autoscript=1`);
       } else if (runError) {
-        toast.warning(`Created "${topic}", but the autopilot run didn't start (${runError}). The next scheduled run will make it.`);
+        toast.warning(`Created ${what} for the next slots, but the autopilot run didn't start (${runError}). The next scheduled run will make them.`);
       } else {
-        toast.success(`Created "${topic}". The autopilot is making it now: script, voice, visuals, render.`);
+        toast.success(`Making ${what} for the next posting slots now: script, voice, visuals, render.`);
       }
     });
 
@@ -93,8 +96,13 @@ export function AutopilotPanel({ channelsOn, events, channels }: { channelsOn: n
                 ))}
               </Select>
             ) : null}
-            <Button size="sm" disabled={creating || !channelId} onClick={createNow} title="Plan a video now and have the autopilot make it, without waiting for a slot">
-              {creating ? <LoaderCircle className="animate-spin" /> : <Plus />} Create a video now
+            <Select value={String(count)} onChange={(e) => setCount(Number(e.target.value))} aria-label="How many upcoming slots" className="h-8 w-auto text-sm">
+              <option value="1">Next slot</option>
+              <option value="3">Next 3 slots</option>
+              <option value="7">Next 7 slots</option>
+            </Select>
+            <Button size="sm" disabled={creating || !channelId} onClick={createNow} title="Make the videos for the upcoming posting slots now, even if they are days away">
+              {creating ? <LoaderCircle className="animate-spin" /> : <Plus />} Make videos ahead
             </Button>
           </div>
         ) : null}
