@@ -3,7 +3,7 @@ import { secretsMatch } from "./crypto";
 /**
  * Workers outside Vercel authenticate to the app with `Authorization: Bearer <secret>`:
  * GitHub Actions runners (render worker, autopilot) use RENDER_WEBHOOK_SECRET and the
- * Wan2GP GPU worker uses WAN2GP_WORKER_SECRET. Returns an error response, or null if allowed.
+ * Wan2GP GPU worker uses WAN2GP_WORKER_SECRET, and the Pinterest worker PINTEREST_WORKER_SECRET. Returns an error response, or null if allowed.
  */
 const MIN_SECRET_LENGTH = 32;
 

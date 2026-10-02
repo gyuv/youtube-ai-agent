@@ -70,8 +70,27 @@ type AutopilotChannel = Pick<
 
 type WorkProject = Pick<VideoProject, "id" | "channelId" | "status" | "topic" | "title" | "autopilotFailures" | "scheduledFor"> & {
   labsAppliedAt?: Date | null;
-  scenes: Pick<Scene, "id" | "sceneIndex" | "locked" | "voiceAudioUrl" | "imageUrl" | "videoClipUrl" | "durationSeconds">[];
+  scenes: (Pick<Scene, "id" | "sceneIndex" | "locked" | "voiceAudioUrl" | "imageUrl" | "videoClipUrl" | "durationSeconds"> &
+    Partial<Pick<Scene, "aiClipEngine" | "aiClipStatus" | "aiClipUpdatedAt">>)[];
 };
+
+/** How long a render waits for the Pinterest worker before going out with the placeholder image. */
+export const PINTEREST_WAIT_MS = 2 * 60 * 60 * 1000;
+
+function autopilotVisualSource(source: VisualSource): "POLLINATIONS" | "PEXELS" | "PINTEREST" {
+  return source === VisualSource.PEXELS || source === VisualSource.PINTEREST ? source : "POLLINATIONS";
+}
+
+/** A Pinterest search is still in flight (and recent), so the scene's visual is about to change. */
+function awaitingPinterest(p: WorkProject, now: Date): boolean {
+  const since = now.getTime() - PINTEREST_WAIT_MS;
+  return p.scenes.some(
+    (s) =>
+      s.aiClipEngine === "PINTEREST" &&
+      (s.aiClipStatus === "QUEUED" || s.aiClipStatus === "RUNNING") &&
+      (s.aiClipUpdatedAt?.getTime() ?? 0) > since,
+  );
+}
 
 async function log(level: "info" | "error", action: string, message: string, ids: { channelId?: string; projectId?: string } = {}) {
   await prisma.autopilotEvent.create({ data: { level, action, message, ...ids } });
@@ -127,10 +146,11 @@ async function recordFailure(project: WorkProject, step: string, error: unknown)
 
 const label = (p: WorkProject) => `"${p.title ?? p.topic}"`;
 
-function findWork(projects: WorkProject[], channels: Map<string, AutopilotChannel>) {
+function findWork(projects: WorkProject[], channels: Map<string, AutopilotChannel>, now: Date) {
   const complete = (p: WorkProject) => p.scenes.length > 0 && p.scenes.every(sceneHasAssets);
   for (const p of projects) {
     const channel = channels.get(p.channelId)!;
+    if (awaitingPinterest(p, now)) continue;
     // Creator Labs package the video (title, SEO, chapters) once, before it renders.
     if (p.status === ProjectStatus.ASSETS_READY && channel.autoLabs && !p.labsAppliedAt) return { kind: "package" as const, project: p, channel };
     if (p.status === ProjectStatus.ASSETS_READY && !channel.autopilotReview) return { kind: "dispatch" as const, project: p, channel };
@@ -303,12 +323,23 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       labsAppliedAt: true,
       scenes: {
         orderBy: { sceneIndex: "asc" },
-        select: { id: true, sceneIndex: true, locked: true, voiceAudioUrl: true, imageUrl: true, videoClipUrl: true, durationSeconds: true },
+        select: {
+          id: true,
+          sceneIndex: true,
+          locked: true,
+          voiceAudioUrl: true,
+          imageUrl: true,
+          videoClipUrl: true,
+          durationSeconds: true,
+          aiClipEngine: true,
+          aiClipStatus: true,
+          aiClipUpdatedAt: true,
+        },
       },
     },
   });
 
-  const work = findWork(projects, byId);
+  const work = findWork(projects, byId, now);
   if (work) {
     const { project, channel } = work;
     const ids = { projectId: project.id, channelId: channel.id };
@@ -329,7 +360,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
         return { action: "dispatched", message, more: true, swept, ...ids };
       }
       if (work.kind === "fill") {
-        const result = await fillSceneAssets(work.sceneId, { visualSource: channel.autopilotVisualSource === VisualSource.PEXELS ? "PEXELS" : "POLLINATIONS" });
+        const result = await fillSceneAssets(work.sceneId, { visualSource: autopilotVisualSource(channel.autopilotVisualSource) });
         if (result.errors.length) throw new Error(result.errors.join("; "));
         const message = `${label(project)}: scene ${result.sceneIndex + 1} got ${result.generated.join(" and ") || "nothing new"}.`;
         await log("info", "filled", message, ids);

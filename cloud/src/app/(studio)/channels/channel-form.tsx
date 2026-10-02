@@ -255,9 +255,10 @@ export function ChannelForm({ channelId, initial, youtubeConnected }: { channelI
                 <Input id="autopilotLeadHours" name="autopilotLeadHours" type="number" min={6} max={168} defaultValue={initial?.autopilotLeadHours ?? 36} />
               </Field>
               <Field id="autopilotVisualSource" label="Visuals">
-                <Select id="autopilotVisualSource" name="autopilotVisualSource" defaultValue={initial?.autopilotVisualSource === "PEXELS" ? "PEXELS" : "POLLINATIONS"}>
+                <Select id="autopilotVisualSource" name="autopilotVisualSource" defaultValue={initial?.autopilotVisualSource === "PEXELS" || initial?.autopilotVisualSource === "PINTEREST" ? initial.autopilotVisualSource : "POLLINATIONS"}>
                   <option value="POLLINATIONS">AI images (Pollinations)</option>
                   <option value="PEXELS">Stock B-roll (Pexels)</option>
+                  <option value="PINTEREST">Pinterest video Pins (worker)</option>
                 </Select>
               </Field>
             </div>

@@ -9,7 +9,7 @@ const dispatchRenderWorkflow = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("./renderDispatcher", () => ({ dispatchRenderWorkflow }));
 
-import { assetStatusFor, dispatchCloudRender, generateProjectAssets, regenerateSceneAudio } from "./pipeline";
+import { assetStatusFor, dispatchCloudRender, generateProjectAssets, regenerateSceneAudio, regenerateSceneVisual } from "./pipeline";
 
 interface FakeScene {
   id: string;
@@ -135,5 +135,25 @@ describe("scene regeneration guards", () => {
   it("reports a missing scene", async () => {
     db.scene.findUnique.mockResolvedValue(null);
     await expect(regenerateSceneAudio("nope")).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("Pinterest visuals", () => {
+  it("queues a search for the worker and keeps the scene's current visual", async () => {
+    db.scene.findUnique.mockResolvedValue({
+      ...complete(0),
+      projectId: "p1",
+      narrationText: "Hello",
+      stockQuery: "rainy street",
+      visualSource: "POLLINATIONS",
+      project: { id: "p1", status: "ASSETS_READY", format: "SHORT", channel: {} },
+    });
+    db.scene.update.mockResolvedValue({});
+    db.scene.findMany.mockResolvedValue([]);
+    db.videoProject.updateMany.mockResolvedValue({ count: 1 });
+    await regenerateSceneVisual("scene_0", { source: "PINTEREST", stockQuery: "neon city" });
+    const { data } = db.scene.update.mock.calls[0][0];
+    expect(data).toMatchObject({ stockQuery: "neon city", aiClipEngine: "PINTEREST", aiClipStatus: "QUEUED", aiClipPrompt: "neon city" });
+    expect(data).not.toHaveProperty("imageUrl");
   });
 });

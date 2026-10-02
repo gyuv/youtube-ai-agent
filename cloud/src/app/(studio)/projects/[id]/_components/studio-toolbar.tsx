@@ -127,6 +127,7 @@ export function StudioToolbar({ projectId, editable, inFlight, sceneCount, locke
           <Select value={visualSource} onChange={(e) => setVisualSource(e.target.value)} disabled={locked} aria-label="Visual source for missing visuals" className="h-9 w-auto">
             <option value="POLLINATIONS">with AI images</option>
             <option value="PEXELS">with stock B-roll</option>
+            <option value="PINTEREST">with Pinterest videos</option>
           </Select>
           {busy === "assets" ? (
             <Button variant="ghost" size="sm" onClick={() => (stopRequested.current = true)}>

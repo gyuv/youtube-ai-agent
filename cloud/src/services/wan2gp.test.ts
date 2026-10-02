@@ -68,8 +68,17 @@ describe("claimNextClip", () => {
     // Abandoned claims become claimable again after the TTL.
     const where = db.scene.findFirst.mock.calls[0][0].where;
     expect(where.AND[1].OR[1].aiClipUpdatedAt.lt.getTime()).toBe(NOW.getTime() - CLAIM_TTL_MS);
-    // Muapi clips never go to the GPU worker.
-    expect(where.AND[0]).toEqual({ OR: [{ aiClipEngine: null }, { aiClipEngine: { not: "MUAPI" } }] });
+    // Muapi and Pinterest requests never go to the GPU worker.
+    expect(where.AND[0]).toEqual({ OR: [{ aiClipEngine: null }, { aiClipEngine: "WAN2GP" }] });
+  });
+
+  it("hands the Pinterest worker only Pinterest searches, with the query as the prompt", async () => {
+    db.scene.findFirst.mockResolvedValue({ ...SCENE, aiClipEngine: "PINTEREST", aiClipPrompt: "trading floor" });
+    db.scene.updateMany.mockResolvedValue({ count: 1 });
+    const job = await claimNextClip(NOW, "PINTEREST");
+    expect(job?.prompt).toBe("trading floor");
+    expect(job?.upload.url).toMatch(/\/pinterest-[0-9a-f]{12}\.mp4$/);
+    expect(db.scene.findFirst.mock.calls[0][0].where.AND[0]).toEqual({ aiClipEngine: "PINTEREST" });
   });
 
   it("retries when another worker wins the race", async () => {
@@ -90,6 +99,16 @@ describe("completeClip", () => {
     const { data } = db.scene.updateMany.mock.calls[0][0];
     expect(data).toMatchObject({ aiClipStatus: null, visualSource: "WAN2GP" });
     expect(data.videoClipUrl).toMatch(/^https:\/\/cdn\/projects\/p1\/scenes\/s1\/wan2gp-[0-9a-f]{12}\.mp4$/);
+  });
+
+  it("marks a Pinterest result as PINTEREST and refuses another engine's report", async () => {
+    db.scene.findUnique.mockResolvedValue({ ...running, aiClipEngine: "PINTEREST" });
+    db.scene.updateMany.mockResolvedValue({ count: 1 });
+    expect(await completeClip({ ok: true, sceneId: "s1", claimedAt: NOW.toISOString() })).toEqual({ applied: false });
+    expect(await completeClip({ ok: true, sceneId: "s1", claimedAt: NOW.toISOString() }, "PINTEREST")).toEqual({ applied: true });
+    const { data } = db.scene.updateMany.mock.calls[0][0];
+    expect(data).toMatchObject({ visualSource: "PINTEREST" });
+    expect(data.videoClipUrl).toMatch(/\/pinterest-[0-9a-f]{12}\.mp4$/);
   });
 
   it("records failures", async () => {

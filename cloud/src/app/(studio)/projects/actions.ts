@@ -21,7 +21,7 @@ import { cancelSceneClip, queueSceneClip } from "@/services/wan2gp";
 import { checkYouTubeVisibility } from "@/services/youtube";
 
 const Id = z.string().regex(/^[a-z0-9]{20,40}$/, "Invalid id");
-const VisualSource = z.enum(["POLLINATIONS", "PEXELS"]);
+const VisualSource = z.enum(["POLLINATIONS", "PEXELS", "PINTEREST"]);
 
 function refresh(projectId?: string) {
   if (projectId) revalidatePath(`/projects/${projectId}`);

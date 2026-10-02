@@ -19,6 +19,9 @@ import { refreshAssetStatus } from "./pipeline";
  *
  * A worker that disappears (Colab sessions end) leaves its claim RUNNING; after CLAIM_TTL_MS the
  * scene is claimable again, and the stale worker's late report is ignored.
+ *
+ * The Pinterest worker (cloud/pinterest/) uses the same queue with aiClipEngine "PINTEREST": its job's
+ * prompt is the search query, and it uploads the first video Pin it can download.
  */
 
 export const CLAIM_TTL_MS = 45 * 60 * 1000;
@@ -30,9 +33,21 @@ export function clipResolution(format: "SHORT" | "LONG_FORM"): { width: number; 
   return format === "SHORT" ? { width: 480, height: 832 } : { width: 832, height: 480 };
 }
 
-function clipPath(projectId: string, sceneId: string, claimedAt: Date): string {
+/** Engines whose clips are made by a worker that polls this app. */
+export type WorkerEngine = "WAN2GP" | "PINTEREST";
+
+/** Rows queued before aiClipEngine existed have it null and belong to Wan2GP. */
+function engineOf(aiClipEngine: string | null): WorkerEngine | "MUAPI" {
+  return aiClipEngine === "PINTEREST" || aiClipEngine === "MUAPI" ? aiClipEngine : "WAN2GP";
+}
+
+function engineFilter(engine: WorkerEngine) {
+  return engine === "PINTEREST" ? { aiClipEngine: "PINTEREST" } : { OR: [{ aiClipEngine: null }, { aiClipEngine: "WAN2GP" }] };
+}
+
+function clipPath(projectId: string, sceneId: string, claimedAt: Date, engine: WorkerEngine = "WAN2GP"): string {
   const hash = createHash("sha256").update(`${sceneId}\u0000${claimedAt.toISOString()}`).digest("hex").slice(0, 12);
-  return `projects/${projectId}/scenes/${sceneId}/wan2gp-${hash}.mp4`;
+  return `projects/${projectId}/scenes/${sceneId}/${engine.toLowerCase()}-${hash}.mp4`;
 }
 
 export function clipPromptFor(scene: { visualPrompt: string | null; narrationText: string }, style?: string | null): string {
@@ -90,14 +105,14 @@ export interface ClipJob {
 }
 
 /** Hand the oldest waiting request to a worker, or null when there is nothing to do. */
-export async function claimNextClip(now = new Date()): Promise<ClipJob | null> {
+export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WAN2GP"): Promise<ClipJob | null> {
   const stale = new Date(now.getTime() - CLAIM_TTL_MS);
   const where = {
     project: { status: { in: EDITABLE } },
     locked: false,
-    // Muapi clips are rendered by Muapi and polled by the app, never handed to the GPU worker.
+    // Each worker claims only its own engine's requests; Muapi clips are polled by the app itself.
     AND: [
-      { OR: [{ aiClipEngine: null }, { aiClipEngine: { not: "MUAPI" } }] },
+      engineFilter(engine),
       { OR: [{ aiClipStatus: AiClipStatus.QUEUED }, { aiClipStatus: AiClipStatus.RUNNING, aiClipUpdatedAt: { lt: stale } }] },
     ],
   };
@@ -120,11 +135,11 @@ export async function claimNextClip(now = new Date()): Promise<ClipJob | null> {
     return {
       sceneId: scene.id,
       claimedAt: now.toISOString(),
-      prompt: scene.aiClipPrompt?.trim() || clipPromptFor(scene),
+      prompt: scene.aiClipPrompt?.trim() || (engine === "PINTEREST" ? scene.stockQuery?.trim() || scene.narrationText : clipPromptFor(scene)),
       ...clipResolution(scene.project.format),
       durationSeconds: scene.durationSeconds,
       imageUrl: scene.imageUrl,
-      upload: await createSignedUpload(clipPath(scene.project.id, scene.id, now), "video/mp4"),
+      upload: await createSignedUpload(clipPath(scene.project.id, scene.id, now, engine), "video/mp4"),
     };
   }
   return null;
@@ -136,13 +151,14 @@ export const ClipReportSchema = z.discriminatedUnion("ok", [
 ]);
 export type ClipReport = z.infer<typeof ClipReportSchema>;
 
-/** Record a worker's result. Reports for a claim that is no longer current are ignored. */
-export async function completeClip(report: ClipReport): Promise<{ applied: boolean }> {
+/** Record a worker's result. Reports for a claim that is no longer current (or another engine's) are ignored. */
+export async function completeClip(report: ClipReport, engine: WorkerEngine = "WAN2GP"): Promise<{ applied: boolean }> {
   const claimedAt = new Date(report.claimedAt);
   const scene = await prisma.scene.findUnique({ where: { id: report.sceneId }, include: { project: { select: { id: true, status: true } } } });
   if (!scene) throw new PipelineError("NOT_FOUND", `Scene ${report.sceneId} not found.`);
 
   const current =
+    engineOf(scene.aiClipEngine) === engine &&
     scene.aiClipStatus === AiClipStatus.RUNNING &&
     scene.aiClipUpdatedAt?.getTime() === claimedAt.getTime() &&
     !scene.locked &&
@@ -156,8 +172,8 @@ export async function completeClip(report: ClipReport): Promise<{ applied: boole
           aiClipStatus: null,
           aiClipError: null,
           aiClipUpdatedAt: new Date(),
-          videoClipUrl: publicObjectUrl(clipPath(scene.project.id, scene.id, claimedAt)),
-          visualSource: VisualSource.WAN2GP,
+          videoClipUrl: publicObjectUrl(clipPath(scene.project.id, scene.id, claimedAt, engine)),
+          visualSource: engine === "PINTEREST" ? VisualSource.PINTEREST : VisualSource.WAN2GP,
         }
       : { aiClipStatus: AiClipStatus.FAILED, aiClipError: report.error.slice(0, 2000), aiClipUpdatedAt: new Date() },
   });

@@ -20,7 +20,7 @@ vi.mock("./publish", () => publish);
 vi.mock("./analytics", () => analytics);
 vi.mock("./labsAutomation", () => labs);
 
-import { MAX_AUTOPILOT_FAILURES, autopilotTick, createVideoNow, createVideosAhead } from "./autopilot";
+import { MAX_AUTOPILOT_FAILURES, PINTEREST_WAIT_MS, autopilotTick, createVideoNow, createVideosAhead } from "./autopilot";
 
 const NOW = new Date("2026-09-29T00:00:00Z"); // Tuesday
 const CHANNEL = {
@@ -148,6 +148,19 @@ describe("autopilotTick", () => {
     const result = await autopilotTick(NOW);
     expect(pipeline.fillSceneAssets).toHaveBeenCalledWith("s2", { visualSource: "PEXELS" });
     expect(result).toMatchObject({ action: "filled", more: true });
+  });
+
+  it("holds a render while a recent Pinterest search is pending, then renders anyway", async () => {
+    const pending = { ...ready(0), aiClipEngine: "PINTEREST", aiClipStatus: "QUEUED", aiClipUpdatedAt: new Date(NOW.getTime() - 60_000) };
+    projectsQuery({ work: [project({ status: "ASSETS_READY", scenes: [pending] })] });
+    await autopilotTick(NOW);
+    expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
+
+    const old = { ...pending, aiClipUpdatedAt: new Date(NOW.getTime() - PINTEREST_WAIT_MS - 1) };
+    projectsQuery({ work: [project({ status: "ASSETS_READY", scenes: [old] })] });
+    pipeline.dispatchCloudRender.mockResolvedValue({});
+    await autopilotTick(NOW);
+    expect(pipeline.dispatchCloudRender).toHaveBeenCalled();
   });
 
   it("counts failures and parks the project as FAILED on the last attempt", async () => {
