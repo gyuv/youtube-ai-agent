@@ -32,6 +32,8 @@ jobs:
       DIRECT_URL: ${{ secrets.DIRECT_URL }}
     steps:
       - name: Check the secret
+        # Runs before checkout, so cloud/ (the default working directory) doesn't exist yet.
+        working-directory: .
         run: |
           if [[ -z "$DIRECT_URL" ]]; then
             echo "::error::Add the DIRECT_URL repository secret (Supabase session pooler, port 5432)"
