@@ -34,6 +34,7 @@ type ChannelFields = Pick<
   | "autopilotVisualSource"
   | "topicBacklog"
   | "learnFromAnalytics"
+  | "autoLabs"
   | "performanceNotes"
   | "performanceNotesAt"
 >;
@@ -259,6 +260,17 @@ export function ChannelForm({ channelId, initial, youtubeConnected }: { channelI
                   <option value="PEXELS">Stock B-roll (Pexels)</option>
                 </Select>
               </Field>
+            </div>
+            <div className="grid gap-2 rounded-lg border p-3">
+              <Label className="font-normal">
+                <Switch name="autoLabs" defaultChecked={initial?.autoLabs ?? true} />
+                Run Creator Labs automatically
+              </Label>
+              <FieldHint>
+                Before each autopilot video renders, Script Lab writes its title, thumbnail text and SEO copy (and Edit Lab its chapters for
+                long videos). Once a week, Growth Lab audits the channel, checks what is working in your niche, and adds its best topic ideas
+                to the backlog below. Every run is saved on the Lab pages.
+              </FieldHint>
             </div>
             <div className="grid gap-2 rounded-lg border p-3">
               <Label className="font-normal">

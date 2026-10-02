@@ -411,6 +411,11 @@ yourself in YouTube Studio if you want it public.
   page collects it by itself and the renderer loops it to the narration. Muapi is the engine behind
   Open-Higgsfield-AI and charges per clip from your Muapi credits. Wan2GP on Colab stays the free
   option.
+- **Creator Labs on autopilot** (Channels → Autopilot → *Run Creator Labs automatically*, on by
+  default and set by the Full automation switch): before each autopilot video renders, Script Lab
+  applies its title, thumbnail text and SEO copy (and Edit Lab its chapters for long-form). Once a
+  week, Growth Lab runs the audit, viral-in-niche and plan, and adds up to 7 new topics to the
+  backlog. Every run, automatic or manual, is listed under *Recent runs* on the Lab pages.
 - **Script Lab, Edit Lab and Growth Lab** (top menu): the eleven tools from
   [youtube-agent-skill](https://github.com/Jakeschincariol/youtube-agent-skill) (MIT), adapted to the
   channel you pick: its niche, audience, style guide, learned lessons and real video stats.
