@@ -8,7 +8,10 @@ const dispatchRenderWorkflow = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("./renderDispatcher", () => ({ dispatchRenderWorkflow }));
+const visuals = vi.hoisted(() => ({ generatePollinationsImage: vi.fn(), findStockVisual: vi.fn() }));
+vi.mock("./visualFetcher", async (importOriginal) => ({ ...(await importOriginal<object>()), ...visuals }));
 
+import { PipelineError } from "@/lib/errors";
 import { assetStatusFor, dispatchCloudRender, generateProjectAssets, regenerateSceneAudio, regenerateSceneVisual } from "./pipeline";
 
 interface FakeScene {
@@ -155,5 +158,42 @@ describe("Pinterest visuals", () => {
     const { data } = db.scene.update.mock.calls[0][0];
     expect(data).toMatchObject({ stockQuery: "neon city", aiClipEngine: "PINTEREST", aiClipStatus: "QUEUED", aiClipPrompt: "neon city" });
     expect(data).not.toHaveProperty("imageUrl");
+  });
+});
+
+describe("Pollinations fallback", () => {
+  const scene = {
+    ...complete(0),
+    imageUrl: null,
+    projectId: "p1",
+    narrationText: "Hello",
+    visualPrompt: "a fox at dawn",
+    stockQuery: "fox dawn",
+    visualSource: "POLLINATIONS",
+    project: { id: "p1", status: "SCRIPTED", format: "SHORT", channel: {} },
+  };
+
+  beforeEach(() => {
+    db.scene.findUnique.mockResolvedValue(scene);
+    db.scene.update.mockResolvedValue({});
+    db.scene.findMany.mockResolvedValue([]);
+    db.videoProject.updateMany.mockResolvedValue({ count: 1 });
+    visuals.generatePollinationsImage.mockRejectedValue(new PipelineError("PROVIDER", "Pollinations returned 402"));
+    visuals.findStockVisual.mockResolvedValue({ kind: "photo", url: "https://pexels/p.jpg", previewUrl: "https://pexels/p.jpg" });
+  });
+
+  it("uses a Pexels visual when Pollinations refuses an automatic fill", async () => {
+    vi.stubEnv("PEXELS_API_KEY", "key");
+    await regenerateSceneVisual("scene_0");
+    expect(db.scene.update.mock.calls[0][0].data).toMatchObject({ visualSource: "PEXELS", imageUrl: "https://pexels/p.jpg", stockQuery: "fox dawn" });
+    vi.unstubAllEnvs();
+  });
+
+  it("keeps the Pollinations error without a Pexels key, or when the operator typed a prompt", async () => {
+    vi.stubEnv("PEXELS_API_KEY", "");
+    await expect(regenerateSceneVisual("scene_0")).rejects.toThrow(/402/);
+    vi.stubEnv("PEXELS_API_KEY", "key");
+    await expect(regenerateSceneVisual("scene_0", { source: "POLLINATIONS", visualPrompt: "a fox" })).rejects.toThrow(/402/);
+    vi.unstubAllEnvs();
   });
 });
