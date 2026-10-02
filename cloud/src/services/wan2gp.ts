@@ -104,10 +104,9 @@ export interface ClipJob {
   upload: SignedUpload;
 }
 
-/** Hand the oldest waiting request to a worker, or null when there is nothing to do. */
-export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WAN2GP"): Promise<ClipJob | null> {
+function claimableWhere(engine: WorkerEngine, now: Date) {
   const stale = new Date(now.getTime() - CLAIM_TTL_MS);
-  const where = {
+  return {
     project: { status: { in: EDITABLE } },
     locked: false,
     // Each worker claims only its own engine's requests; Muapi clips are polled by the app itself.
@@ -116,6 +115,16 @@ export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WA
       { OR: [{ aiClipStatus: AiClipStatus.QUEUED }, { aiClipStatus: AiClipStatus.RUNNING, aiClipUpdatedAt: { lt: stale } }] },
     ],
   };
+}
+
+/** How many requests a worker could claim right now, without claiming any (for scheduled workers). */
+export async function countClaimableClips(engine: WorkerEngine, now = new Date()): Promise<number> {
+  return prisma.scene.count({ where: claimableWhere(engine, now) });
+}
+
+/** Hand the oldest waiting request to a worker, or null when there is nothing to do. */
+export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WAN2GP"): Promise<ClipJob | null> {
+  const where = claimableWhere(engine, now);
 
   // Two workers can race for the same row; the conditional update lets exactly one win.
   for (let attempt = 0; attempt < 3; attempt++) {
