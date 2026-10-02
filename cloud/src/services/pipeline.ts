@@ -28,6 +28,17 @@ const ASSET_TRACKED: ProjectStatus[] = [
 
 type SceneAssets = Pick<Scene, "voiceAudioUrl" | "imageUrl" | "videoClipUrl" | "durationSeconds">;
 
+/** A Pinterest search is queued or running, so the scene's visual is on its way. */
+export function pinterestPending(scene: Partial<Pick<Scene, "aiClipEngine" | "aiClipStatus">>): boolean {
+  return scene.aiClipEngine === "PINTEREST" && (scene.aiClipStatus === AiClipStatus.QUEUED || scene.aiClipStatus === AiClipStatus.RUNNING);
+}
+
+/** What fillSceneAssets would do for the scene; a pending Pinterest search needs no visual work. */
+export function sceneNeedsFill(scene: SceneAssets & Partial<Pick<Scene, "aiClipEngine" | "aiClipStatus">>): boolean {
+  if (!scene.voiceAudioUrl) return true;
+  return !scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene);
+}
+
 export function sceneHasAssets(scene: SceneAssets): boolean {
   return Boolean(scene.voiceAudioUrl && (scene.imageUrl || scene.videoClipUrl) && scene.durationSeconds > 0);
 }
@@ -253,9 +264,14 @@ export async function regenerateSceneVisual(sceneId: string, request: VisualRequ
   let data: Prisma.SceneUpdateInput;
   if (source === VisualSource.PINTEREST) {
     // Pinterest is scraped by a worker outside Vercel (cloud/pinterest/), so this only queues the
-    // search. A scene with no visual gets an AI image meanwhile, so a render never waits on the worker.
+    // search. Pinterest scenes are video-only: no placeholder image, and a still the scene had is
+    // dropped, so the scene (and its render) waits for the worker's video.
+    if (!request.stockQuery?.trim() && scene.aiClipEngine === "PINTEREST" && scene.aiClipStatus === AiClipStatus.FAILED) {
+      // Automatic fills don't re-run a search that already failed; the operator edits the query instead.
+      throw new PipelineError("PROVIDER", `Pinterest found no video for "${query}": ${scene.aiClipError ?? "unknown error"}. Try another search phrase.`);
+    }
     data = {
-      ...(scene.imageUrl || scene.videoClipUrl ? {} : await pollinations()),
+      ...(scene.videoClipUrl ? {} : { imageUrl: null }),
       stockQuery: query,
       aiClipEngine: "PINTEREST",
       aiClipStatus: AiClipStatus.QUEUED,
@@ -304,7 +320,7 @@ export async function fillSceneAssets(sceneId: string, options: { visualSource?:
       result.errors.push(`Voice: ${errorMessage(error)}`);
     }
   }
-  if (!scene.imageUrl && !scene.videoClipUrl) {
+  if (!scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene)) {
     try {
       await regenerateSceneVisual(sceneId, { source: options.visualSource });
       result.generated.push("visual");
@@ -349,7 +365,7 @@ export async function generateProjectAssets(projectId: string): Promise<AssetRun
         summary.failed.push({ sceneIndex: scene.sceneIndex, step: "audio", error: errorMessage(error) });
       }
     }
-    if (!scene.imageUrl && !scene.videoClipUrl) {
+    if (!scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene)) {
       try {
         await regenerateSceneVisual(scene.id);
         summary.generated++;
