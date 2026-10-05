@@ -249,3 +249,16 @@ model LabReport {
 
   @@index([channelId, createdAt])
 }
+
+/// Research cache: metadata and transcripts of any YouTube video, so repeat lookups cost no quota.
+model ResearchTranscript {
+  id         String   @id @default(cuid())
+  videoId    String
+  language   String // requested language, "" = automatic
+  actualLang String // language code YouTube returned
+  translated Boolean  @default(false)
+  text       String   @db.Text
+  fetchedAt  DateTime @default(now())
+
+  @@unique([videoId, language])
+}
