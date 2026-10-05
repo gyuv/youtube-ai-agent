@@ -675,3 +675,4 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 > This tool is for legitimate content creation. Comply with [YouTube's Terms of Service](https://www.youtube.com/t/terms) and Community Guidelines.
+
