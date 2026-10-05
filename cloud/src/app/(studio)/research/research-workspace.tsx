@@ -302,6 +302,11 @@ function TranscriptView({ transcript, title }: { transcript: Transcript; title: 
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline">{transcript.language}{transcript.translated ? " (translated)" : ""}</Badge>
         {transcript.cached ? <Badge variant="secondary">cached</Badge> : null}
+        {transcript.source === "ai" ? (
+          <Badge variant="secondary" title="YouTube blocked caption access from the server, so Gemini transcribed the video. Expect small errors.">
+            AI transcript
+          </Badge>
+        ) : null}
         <span className="text-xs text-muted-foreground">
           {words.toLocaleString()} words · {Math.max(1, Math.ceil(words / 200))} min read
           {q ? ` · ${matches} ${matches === 1 ? "match" : "matches"}` : ""}
