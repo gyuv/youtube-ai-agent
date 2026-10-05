@@ -20,6 +20,10 @@ installed locally.
 - **Renders** 1080p Shorts (9:16) and long-form videos (16:9) on GitHub Actions.
 - **Publishes** to YouTube with scheduling, chapters, `#Shorts` and the AI-content disclosure, then
   checks YouTube really applied the visibility you chose.
+- **Researches** any YouTube video or playlist (adapted from [OmniTube](https://github.com/JeannVictor/omnitube)):
+  details and engagement stats, a transcript in any language (with YouTube's translation as a fallback),
+  search with highlighting, word count and reading time, paragraph view, copy and TXT export (one
+  video or a whole playlist), cached in the database, plus one click to start a new video from it.
 - **Runs on autopilot** on your posting schedule, with an optional review step before anything
   renders, retry limits, and an activity log.
 
