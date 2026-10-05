@@ -1,0 +1,55 @@
+# Lumen agent + OpenShorts clipping backend on one private network.
+#
+#   cp .env.example .env    # set GEMINI_API_KEY (both services use it)
+#   docker compose up -d --build
+#
+# The agent reaches OpenShorts at http://openshorts:8000 (OPENSHORTS_API_URL).
+# OpenShorts has no published image, so it is built from its GitHub repository;
+# the first build downloads its ML stack (Whisper, MediaPipe, YOLO) and takes a while.
+
+services:
+  agent:
+    build: .
+    container_name: lumen-agent
+    env_file: .env
+    environment:
+      OPENSHORTS_API_URL: http://openshorts:8000
+    ports:
+      - "3456:3456"
+    volumes:
+      - ./data:/app/data # rendered clips land in data/openshorts/<job_id>/
+    depends_on:
+      openshorts:
+        condition: service_healthy
+    networks: [clipping]
+    restart: unless-stopped
+
+  openshorts:
+    build:
+      context: https://github.com/mutonby/openshorts.git
+    container_name: openshorts-backend
+    environment:
+      GEMINI_API_KEY: ${OPENSHORTS_GEMINI_API_KEY:-${GEMINI_API_KEY}}
+      # Optional: Netscape-format cookies when YouTube asks to "confirm you're not a bot".
+      YOUTUBE_COOKIES: ${YOUTUBE_COOKIES:-}
+      # Optional: Upload-Post key for OpenShorts' own publish_clip (TikTok/Instagram/YouTube).
+      UPLOAD_POST_API_KEY: ${UPLOAD_POST_API_KEY:-}
+      # CPU defaults; on an NVIDIA GPU use WHISPER_MODEL=large-v3-turbo WHISPER_DEVICE=cuda WHISPER_COMPUTE=float16.
+      WHISPER_MODEL: ${OPENSHORTS_WHISPER_MODEL:-small}
+      WHISPER_DEVICE: ${OPENSHORTS_WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE: ${OPENSHORTS_WHISPER_COMPUTE:-int8}
+      MAX_CONCURRENT_JOBS: ${OPENSHORTS_MAX_CONCURRENT_JOBS:-1}
+    # Not published to the host by default: only the agent talks to it.
+    # Uncomment to open the API (and docs at /docs) on http://localhost:8000.
+    # ports:
+    #   - "8000:8000"
+    volumes:
+      - openshorts-output:/app/output
+    networks: [clipping]
+    restart: unless-stopped
+
+networks:
+  clipping:
+
+volumes:
+  openshorts-output:

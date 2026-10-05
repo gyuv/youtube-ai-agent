@@ -1,0 +1,7 @@
+node_modules
+cloud
+data
+.env
+.git
+reports
+*.log

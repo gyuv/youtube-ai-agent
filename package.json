@@ -18,7 +18,9 @@
     "agent:publishing": "node agents/publishing-scheduling-agent.js",
     "agent:analytics": "node agents/analytics-optimization-agent.js",
     "credentials:setup": "node utils/credential-manager.js setup",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "openshorts:clip": "node scripts/openshorts-clip.js",
+    "test:openshorts": "node --test tests/openshorts.test.js"
   },
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.0",
