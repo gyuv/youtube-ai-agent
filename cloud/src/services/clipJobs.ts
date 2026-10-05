@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ClipJobStatus, ProjectStatus, VideoFormat } from "@/generated/prisma/enums";
+import { ensureClipSchema } from "@/lib/ensureSchema";
 import { PipelineError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { createSignedUpload, publicObjectUrl, type SignedUpload } from "@/lib/storage";
@@ -31,6 +32,7 @@ export const NewClipJobSchema = z.object({
 /** Look up the video, have Gemini pick its best moments, and store them for review. */
 export async function createClipJob(raw: z.input<typeof NewClipJobSchema>) {
   const input = NewClipJobSchema.parse(raw);
+  await ensureClipSchema();
   const channel = await prisma.channel.findUnique({ where: { id: input.channelId }, select: { id: true } });
   if (!channel) throw new PipelineError("NOT_FOUND", "Channel not found.");
   const video = await getResearchVideo(input.videoId);
@@ -58,11 +60,13 @@ export async function createClipJob(raw: z.input<typeof NewClipJobSchema>) {
   });
 }
 
-export function listClipJobs() {
+export async function listClipJobs() {
+  await ensureClipSchema();
   return prisma.clipJob.findMany({ orderBy: { createdAt: "desc" }, take: 50, include: { channel: { select: { name: true } } } });
 }
 
 export async function getClipJob(id: string) {
+  await ensureClipSchema();
   const job = await prisma.clipJob.findUnique({ where: { id }, include: { channel: { select: { id: true, name: true } } } });
   if (!job) throw new PipelineError("NOT_FOUND", "Clip job not found.");
   return { ...job, moments: MomentsSchema.parse(job.moments) };
@@ -122,6 +126,7 @@ const clipPath = (jobId: string, momentId: string) => `clips/${jobId}/${momentId
 async function setMoment(jobId: string, momentId: string, patch: Partial<Moment>) {
   // Read-modify-write inside a transaction so two clip events can't overwrite each other.
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "ClipJob" WHERE "id" = ${jobId} FOR UPDATE`; // serialise concurrent events
     const row = await tx.clipJob.findUnique({ where: { id: jobId } });
     if (!row) throw new PipelineError("NOT_FOUND", "Clip job not found.");
     const moments = MomentsSchema.parse(row.moments);

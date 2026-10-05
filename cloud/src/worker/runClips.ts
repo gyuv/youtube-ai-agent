@@ -150,6 +150,9 @@ async function downloadSection(order: ClipWorkOrder, start: number, end: number,
     "mp4",
     "--download-sections",
     `*${from.toFixed(2)}-${(end + PAD).toFixed(2)}`,
+    // Cut at exactly `from` (re-encoding the cut points) so the section starts where the
+    // trim and caption offsets below assume it does, not at an earlier keyframe.
+    "--force-keyframes-at-cuts",
     "-o",
     out,
     ...(cookiesFile ? ["--cookies", cookiesFile] : []),
