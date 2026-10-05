@@ -5,7 +5,8 @@ import { ResearchWorkspace } from "./research-workspace";
 
 export const metadata: Metadata = { title: "Research" };
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+// "Find best moments" sends a long transcript (or the video) to Gemini from a server action.
+export const maxDuration = 300;
 
 export default async function Page() {
   const channels = (await listChannels()).map((c) => ({ id: c.id, name: c.name }));

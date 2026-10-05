@@ -1,0 +1,98 @@
+name: Clip video
+
+# Long video -> Shorts. Started by the studio's "Render clips" button on a clip job
+# (repository_dispatch, see cloud/src/services/clipJobs.ts) or by hand from the Actions tab.
+# GitHub only runs repository_dispatch workflows that exist on the default branch.
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   APP_URL                 https URL of the deployed studio (same as for Render video)
+#   RENDER_WEBHOOK_SECRET   same value as in Vercel
+#   YOUTUBE_COOKIES         optional; Netscape cookies.txt from a logged-in browser, for when
+#                           YouTube asks GitHub's servers to "confirm you're not a bot"
+
+on:
+  repository_dispatch:
+    types: [clip-video]
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: ClipJob id to render
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clip-${{ github.event.client_payload.job_id || inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  clip:
+    name: Clip ${{ github.event.client_payload.job_id || inputs.job_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: cloud
+    env:
+      # Untrusted input: only ever used through this env var, never interpolated into scripts.
+      JOB_ID: ${{ github.event.client_payload.job_id || inputs.job_id }}
+      APP_URL: ${{ secrets.APP_URL }}
+      RENDER_WEBHOOK_SECRET: ${{ secrets.RENDER_WEBHOOK_SECRET }}
+
+    steps:
+      - name: Check inputs and secrets
+        working-directory: .
+        run: |
+          if [[ ! "$JOB_ID" =~ ^[a-z0-9]{20,40}$ ]]; then
+            echo "::error::job_id must be a ClipJob id"; exit 1
+          fi
+          if [[ -z "$APP_URL" || -z "$RENDER_WEBHOOK_SECRET" ]]; then
+            echo "::error::Add the APP_URL and RENDER_WEBHOOK_SECRET repository secrets"; exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloud/package-lock.json
+
+      - name: Install FFmpeg and yt-dlp
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python3 -m pip install --quiet --upgrade --break-system-packages yt-dlp
+          yt-dlp --version
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Write YouTube cookies
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          if [[ -n "$YOUTUBE_COOKIES" ]]; then
+            printf '%s\n' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/cookies.txt"
+            echo "YOUTUBE_COOKIES_FILE=$RUNNER_TEMP/cookies.txt" >> "$GITHUB_ENV"
+          fi
+
+      - name: Cut, reframe, caption and upload
+        run: npm run clip:worker
+
+      - name: Report failure to the studio
+        if: failure() || cancelled()
+        working-directory: .
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [[ "$JOB_ID" =~ ^[a-z0-9]{20,40}$ && -n "$APP_URL" ]] || exit 0
+          jq -n --arg j "$JOB_ID" --arg r "$GITHUB_RUN_ID" --arg e "Clip job ended with status $JOB_STATUS. Logs: $RUN_URL" \
+            '{event: "failed", jobId: $j, runId: $r, error: $e}' |
+            curl -sS --retry 3 -X POST "$APP_URL/api/clips/webhook" \
+              -H "Authorization: Bearer $RENDER_WEBHOOK_SECRET" -H "Content-Type: application/json" --data @- || true

@@ -1,5 +1,8 @@
+import { GoogleGenAI, MediaResolution } from "@google/genai";
+import { requireEnv } from "@/lib/env";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
+import { type GeminiClient, geminiModels, parseJsonText } from "./gemini";
 import { getChannelAccessToken } from "./youtube";
 
 // Research any public YouTube video or playlist: metadata through the YouTube Data API (using a
@@ -178,6 +181,8 @@ export interface Transcript {
   translated: boolean;
   text: string;
   cached: boolean;
+  /** "ai" when YouTube blocked caption access and Gemini transcribed the video instead. */
+  source?: "captions" | "ai";
 }
 
 interface CaptionTrack {
@@ -187,15 +192,44 @@ interface CaptionTrack {
   isTranslatable?: boolean;
 }
 
-const INNERTUBE_CLIENT = { clientName: "ANDROID", clientVersion: "20.10.38", androidSdkVersion: 30, hl: "en" };
+/**
+ * YouTube player clients to ask for caption tracks. Datacenter IPs (Vercel) often get a
+ * "confirm you're not a bot" answer from one client and a normal one from another, so each is
+ * tried in turn before giving up.
+ */
+const PLAYER_CLIENTS = [
+  {
+    client: { clientName: "ANDROID", clientVersion: "20.10.38", androidSdkVersion: 30, hl: "en" },
+    userAgent: "com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip",
+  },
+  {
+    client: { clientName: "IOS", clientVersion: "20.10.4", deviceMake: "Apple", deviceModel: "iPhone16,2", osName: "iPhone", osVersion: "18.3.2.22D82", hl: "en" },
+    userAgent: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+  },
+  {
+    client: { clientName: "TVHTML5_SIMPLY_EMBEDDED_PLAYER", clientVersion: "2.0", hl: "en" },
+    thirdParty: { embedUrl: "https://www.youtube.com/" },
+    userAgent: "Mozilla/5.0 (PlayStation; PlayStation 4/12.00) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  },
+  {
+    client: { clientName: "WEB_EMBEDDED_PLAYER", clientVersion: "1.20250310.01.00", hl: "en" },
+    thirdParty: { embedUrl: "https://www.youtube.com/" },
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+  },
+];
 
-async function fetchCaptionTracks(videoId: string): Promise<CaptionTrack[]> {
+type PlayerClient = (typeof PLAYER_CLIENTS)[number];
+
+async function fetchCaptionTracksWith(videoId: string, player: PlayerClient): Promise<CaptionTrack[]> {
   let res: Response;
   try {
     res = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "User-Agent": "com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip" },
-      body: JSON.stringify({ context: { client: INNERTUBE_CLIENT }, videoId }),
+      headers: { "Content-Type": "application/json", "User-Agent": player.userAgent },
+      body: JSON.stringify({
+        context: { client: player.client, ...("thirdParty" in player ? { thirdParty: player.thirdParty } : {}) },
+        videoId,
+      }),
       signal: AbortSignal.timeout(20_000),
     });
   } catch (error) {
@@ -211,10 +245,76 @@ async function fetchCaptionTracks(videoId: string): Promise<CaptionTrack[]> {
   if (status === "LOGIN_REQUIRED" && /bot/i.test(body.playabilityStatus?.reason ?? "")) {
     throw new TranscriptError("BLOCKED", "YouTube asked this server to prove it is not a bot. Try again later.");
   }
-  if (status && status !== "OK") throw new TranscriptError("UNAVAILABLE", body.playabilityStatus?.reason ?? "Video unavailable or private.");
+  if (status && status !== "OK") {
+    // Embedded clients are refused for videos that disallow embedding; another client may still work.
+    throw new TranscriptError(status === "UNPLAYABLE" ? "BLOCKED" : "UNAVAILABLE", body.playabilityStatus?.reason ?? "Video unavailable or private.");
+  }
   const tracks = body.captions?.playerCaptionsTracklistRenderer?.captionTracks;
   if (!tracks?.length) throw new TranscriptError("DISABLED", "This video has no captions.");
   return tracks;
+}
+
+/** Caption tracks from the first player client YouTube answers normally. */
+export async function fetchCaptionTracks(videoId: string, clients: PlayerClient[] = PLAYER_CLIENTS): Promise<CaptionTrack[]> {
+  let lastBlock: TranscriptError | null = null;
+  for (const player of clients) {
+    try {
+      return await fetchCaptionTracksWith(videoId, player);
+    } catch (error) {
+      if (error instanceof TranscriptError && error.reason === "BLOCKED") {
+        lastBlock = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastBlock ?? new TranscriptError("BLOCKED", "YouTube refused every transcript request from this server.");
+}
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English", hi: "Hindi", es: "Spanish", pt: "Portuguese", fr: "French", de: "German",
+  it: "Italian", ja: "Japanese", ko: "Korean", ta: "Tamil", te: "Telugu",
+};
+
+/**
+ * Last resort when YouTube blocks caption access from this server: Gemini watches the public
+ * video itself (it fetches YouTube links on Google's side) and writes the transcript.
+ */
+export async function transcribeWithGemini(
+  videoId: string,
+  language: string,
+  client: GeminiClient = new GoogleGenAI({ apiKey: requireEnv("GEMINI_API_KEY") }),
+): Promise<{ language: string; text: string }> {
+  const target = language ? `in ${LANGUAGE_NAMES[base(language)] ?? language} (translate if the video is in another language)` : "in the language that is spoken";
+  const failures: string[] = [];
+  for (const model of geminiModels()) {
+    try {
+      const response = await client.models.generateContent({
+        model,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { fileData: { fileUri: `https://www.youtube.com/watch?v=${videoId}`, mimeType: "video/*" } },
+              {
+                text:
+                  `Transcribe everything that is said in this video, word for word, ${target}. ` +
+                  'Answer with JSON: {"language": "<ISO 639-1 code of the transcript>", "text": "<the transcript as plain text, no timestamps or speaker labels>"}.',
+              },
+            ],
+          },
+        ],
+        config: { responseMimeType: "application/json", mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW },
+      });
+      const parsed = parseJsonText(response.text) as { language?: unknown; text?: unknown };
+      const text = typeof parsed.text === "string" ? parsed.text.replace(/\s+/g, " ").trim() : "";
+      if (!text) throw new Error("empty transcript");
+      return { language: typeof parsed.language === "string" && parsed.language ? parsed.language : language || "auto", text };
+    } catch (error) {
+      failures.push(`${model}: ${errorMessage(error)}`);
+    }
+  }
+  throw new PipelineError("PROVIDER", `Gemini could not transcribe the video: ${failures.join("; ").slice(0, 300)}`);
 }
 
 const base = (code: string) => code.toLowerCase().split("-")[0];
@@ -257,6 +357,49 @@ export function timedTextToPlain(xml: string): string {
     .trim();
 }
 
+export interface TimedSegment {
+  start: number; // seconds
+  end: number;
+  text: string;
+}
+
+const attr = (tag: string, name: string) => tag.match(new RegExp(`\\b${name}="([\\d.]+)"`))?.[1];
+
+/** Timed lines from YouTube's timedtext XML: classic `<text start dur>` (seconds) or srv3 `<p t d>` (ms). */
+export function timedTextToSegments(xml: string): TimedSegment[] {
+  const out: TimedSegment[] = [];
+  for (const m of xml.matchAll(/<(text|p)\b([^>]*)>([\s\S]*?)<\/\1>/g)) {
+    const [, tag, attrs, body] = m;
+    const ms = tag === "p";
+    const start = Number(attr(attrs, ms ? "t" : "start") ?? NaN) / (ms ? 1000 : 1);
+    const dur = Number(attr(attrs, ms ? "d" : "dur") ?? 0) / (ms ? 1000 : 1);
+    const text = decodeEntities(decodeEntities(body.replace(/<[^>]+>/g, "")))
+      .replace(/\[(?:music|applause|laughter|música|aplausos)\]/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text && Number.isFinite(start)) out.push({ start, end: start + Math.max(dur, 0.5), text });
+  }
+  // Auto-captions overlap (roll-up); end each line where the next one starts.
+  for (let i = 0; i < out.length - 1; i++) out[i].end = Math.min(out[i].end, Math.max(out[i].start + 0.3, out[i + 1].start));
+  return out;
+}
+
+/** The source-language transcript with timings, for picking clip moments. Not cached. */
+export async function getTimedTranscript(videoId: string): Promise<{ language: string; segments: TimedSegment[] }> {
+  if (!VIDEO_ID.test(videoId)) throw new PipelineError("CONFLICT", "Invalid video id.");
+  const { track } = pickTrack(await fetchCaptionTracks(videoId), "");
+  const url = new URL(track.baseUrl);
+  url.searchParams.delete("fmt");
+  const res = await fetch(url, { signal: AbortSignal.timeout(20_000) }).catch((error: unknown) => {
+    throw new TranscriptError("BLOCKED", `Could not download captions: ${errorMessage(error)}`);
+  });
+  if (res.status === 429) throw new TranscriptError("BLOCKED", "YouTube is rate-limiting caption downloads.");
+  if (!res.ok) throw new TranscriptError("UNAVAILABLE", `Caption download failed (${res.status}).`);
+  const segments = timedTextToSegments(await res.text());
+  if (!segments.length) throw new TranscriptError("NOT_FOUND", "The captions were empty.");
+  return { language: track.languageCode, segments };
+}
+
 /** A transcript in the wanted language ("" = automatic), from the cache when we have one. */
 export async function getTranscript(videoId: string, language = "", { refresh = false } = {}): Promise<Transcript> {
   if (!VIDEO_ID.test(videoId)) throw new PipelineError("CONFLICT", "Invalid video id.");
@@ -265,7 +408,26 @@ export async function getTranscript(videoId: string, language = "", { refresh = 
     if (hit) return { videoId, language: hit.actualLang, translated: hit.translated, text: hit.text, cached: true };
   }
 
-  const { track, translateTo } = pickTrack(await fetchCaptionTracks(videoId), language);
+  let tracks: CaptionTrack[];
+  try {
+    tracks = await fetchCaptionTracks(videoId);
+  } catch (error) {
+    if (!(error instanceof TranscriptError && error.reason === "BLOCKED") || !process.env.GEMINI_API_KEY) throw error;
+    let ai: { language: string; text: string };
+    try {
+      ai = await transcribeWithGemini(videoId, language);
+    } catch (aiError) {
+      throw new TranscriptError("BLOCKED", `${error.message} The AI fallback failed too: ${errorMessage(aiError)}`);
+    }
+    await prisma.researchTranscript.upsert({
+      where: { videoId_language: { videoId, language } },
+      create: { videoId, language, actualLang: ai.language, translated: false, text: ai.text },
+      update: { actualLang: ai.language, translated: false, text: ai.text, fetchedAt: new Date() },
+    });
+    return { videoId, language: ai.language, translated: false, text: ai.text, cached: false, source: "ai" };
+  }
+
+  const { track, translateTo } = pickTrack(tracks, language);
   const url = new URL(track.baseUrl);
   url.searchParams.delete("fmt");
   if (translateTo) url.searchParams.set("tlang", translateTo);
@@ -284,5 +446,5 @@ export async function getTranscript(videoId: string, language = "", { refresh = 
     create: { videoId, language, actualLang, translated, text },
     update: { actualLang, translated, text, fetchedAt: new Date() },
   });
-  return { videoId, language: actualLang, translated, text, cached: false };
+  return { videoId, language: actualLang, translated, text, cached: false, source: "captions" };
 }

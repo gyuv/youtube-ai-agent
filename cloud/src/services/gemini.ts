@@ -48,6 +48,10 @@ export interface GeminiJsonRequest<T> {
   task: string;
   systemInstruction: string;
   prompt: string;
+  /** Extra parts sent before the prompt, e.g. a YouTube video as `{ fileData: { fileUri, mimeType } }`. */
+  parts?: unknown[];
+  /** Extra generation config, e.g. `{ mediaResolution }` for video input. */
+  config?: Record<string, unknown>;
   responseJsonSchema: unknown;
   /** Validate and shape the raw text; throwing retries the call. */
   parse: (text: string | undefined) => T;
@@ -74,8 +78,11 @@ export async function generateGeminiJson<T>(request: GeminiJsonRequest<T>): Prom
       try {
         const response = await client.models.generateContent({
           model,
-          contents: request.prompt,
+          contents: request.parts?.length
+            ? ([{ role: "user", parts: [...request.parts, { text: request.prompt }] }] as never)
+            : request.prompt,
           config: {
+            ...request.config,
             systemInstruction: request.systemInstruction,
             responseMimeType: "application/json",
             responseJsonSchema: request.responseJsonSchema,

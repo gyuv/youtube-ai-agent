@@ -110,6 +110,7 @@ model Channel {
 
   projects VideoProject[]
   labReports LabReport[]
+  clipJobs ClipJob[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -261,4 +262,33 @@ model ResearchTranscript {
   fetchedAt  DateTime @default(now())
 
   @@unique([videoId, language])
+}
+
+/// Long video -> Shorts: Gemini picks the best moments, a GitHub Actions runner cuts them.
+enum ClipJobStatus {
+  REVIEW    // moments found; the operator picks and trims them
+  RENDERING // runner dispatched or cutting
+  DONE      // every selected clip finished (some may have failed; see moments)
+  FAILED    // the run failed as a whole; see lastError
+}
+
+model ClipJob {
+  id              String        @id @default(cuid())
+  channelId       String
+  channel         Channel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  videoId         String // YouTube id of the long source video
+  sourceTitle     String
+  durationSeconds Int?
+  status          ClipJobStatus @default(REVIEW)
+  // [{ id, start, end, title, hook, reason, score, focusX, selected, status, videoUrl?, projectId?, error?, captions[] }]
+  moments         Json
+  layout          String        @default("crop") // "crop" (fill 9:16) or "fit" (whole frame on a blurred background)
+  burnCaptions    Boolean       @default(true)
+  momentSource    String        @default("transcript") // "transcript" or "video" (Gemini watched it)
+  renderRunId     String?
+  lastError       String?       @db.Text
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([channelId, createdAt])
 }

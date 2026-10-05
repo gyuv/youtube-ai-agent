@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/edit-lab", label: "Edit Lab", match: (p: string) => p.startsWith("/edit-lab") },
   { href: "/growth-lab", label: "Growth Lab", match: (p: string) => p.startsWith("/growth-lab") },
   { href: "/research", label: "Research", match: (p: string) => p.startsWith("/research") },
+  { href: "/clips", label: "Clips", match: (p: string) => p.startsWith("/clips") },
 ];
 
 export function AppNav() {
