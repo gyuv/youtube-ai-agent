@@ -26,6 +26,9 @@ module.exports = [
       sourceType: 'commonjs',
       globals: {
         AbortController: 'readonly',
+        AbortSignal: 'readonly',
+        Response: 'readonly',
+        setImmediate: 'readonly',
         __dirname: 'readonly',
         Buffer: 'readonly',
         clearTimeout: 'readonly',

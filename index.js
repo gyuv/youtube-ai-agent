@@ -27,6 +27,7 @@ const { AudienceEngagementService } = require('./utils/audience-engagement-servi
 const { GrowthExperimentService } = require('./utils/growth-experiment-service');
 const { AITextService } = require('./utils/ai-text-service');
 const { DiscoverabilityService } = require('./utils/discoverability-service');
+const { registerOpenShortsRoutes } = require('./utils/openshorts/routes');
 const { version } = require('./package.json');
 const chalk = require('chalk');
 
@@ -373,7 +374,8 @@ class YouTubeAutomationAgent {
     };
   }
   setupAPI() {
-    this.app.use(express.json({ limit: '1mb' }));
+    // rawBody lets webhook routes verify HMAC signatures over the exact bytes sent.
+    this.app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
     this.app.use(express.static(path.join(__dirname, 'dashboard')));
 
     if (!process.env.API_KEY) {
@@ -471,6 +473,9 @@ class YouTubeAutomationAgent {
 
   setupOperatorAPI() {
     const protect = this.requireAPIKey();
+
+    // OpenShorts long-video clipping (self-hosted backend, see docker-compose.yml).
+    this.openshorts = registerOpenShortsRoutes(this.app, { protect, logger: this.logger });
 
     this.app.get('/api/dashboard', async (_req, res) => {
       try {
