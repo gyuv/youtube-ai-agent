@@ -6,7 +6,7 @@ const db = vi.hoisted(() => {
     clipJob,
     channel: { findUniqueOrThrow: vi.fn() },
     videoProject: { create: vi.fn() },
-    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({ clipJob })),
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({ clipJob, $queryRaw: vi.fn(async () => []) })),
   };
 });
 const dispatch = vi.hoisted(() => ({ dispatchRepositoryEvent: vi.fn() }));
@@ -16,6 +16,7 @@ vi.mock("@/lib/storage", () => ({
   publicObjectUrl: (path: string) => `https://cdn/${path}`,
 }));
 vi.mock("./renderDispatcher", () => dispatch);
+vi.mock("@/lib/ensureSchema", () => ({ ensureClipSchema: vi.fn(async () => undefined) }));
 vi.mock("./youtube", () => ({ getChannelAccessToken: vi.fn() }));
 
 const { handleClipEvent, renderClipJob } = await import("./clipJobs");
