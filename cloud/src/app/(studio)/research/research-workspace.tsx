@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Copy, Download, LoaderCircle, RefreshCw, Search, Sparkles, WrapText } from "lucide-react";
+import { ChevronDown, Copy, Download, LoaderCircle, RefreshCw, Scissors, Search, Sparkles, WrapText } from "lucide-react";
 import { useEffect, useMemo, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/form-controls";
 import type { ResearchVideo, Transcript } from "@/services/videoResearch";
+import { createClipJobAction } from "../clips/actions";
 import { lookupAction, transcriptAction, videoFromResearchAction, type LookupResult } from "./actions";
 
 const LANGUAGES: Array<[string, string]> = [
@@ -246,23 +247,106 @@ function VideoPanel({ video, channels, compact = false }: { video: ResearchVideo
         {transcript ? <TranscriptView transcript={transcript} title={video.title} /> : null}
 
         {channels.length ? (
-          <div className="flex flex-wrap items-end gap-2 border-t pt-4">
-            <div className="grid gap-1.5">
-              <Label htmlFor={`ch-${video.id}`}>Make a video like this for</Label>
-              <Select id={`ch-${video.id}`} value={channelId} onChange={(e) => setChannelId(e.target.value)} className="w-56">
-                {channels.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </Select>
+          <>
+            <ClipForm video={video} channelId={channelId} setChannelId={setChannelId} channels={channels} />
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              Or write a brand-new AI video inspired by it:
+              <Button variant="ghost" size="sm" onClick={makeVideo} disabled={creating || !channelId}>
+                {creating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
+                New video project
+              </Button>
             </div>
-            <Button variant="outline" onClick={makeVideo} disabled={creating || !channelId}>
-              {creating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-              Create video project
-            </Button>
-          </div>
+          </>
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+/** Long video -> Shorts: Gemini picks the best moments, then the clip job page takes over. */
+function ClipForm({
+  video,
+  channels,
+  channelId,
+  setChannelId,
+}: {
+  video: ResearchVideo;
+  channels: Array<{ id: string; name: string }>;
+  channelId: string;
+  setChannelId: (id: string) => void;
+}) {
+  const [count, setCount] = useState(5);
+  const [maxSeconds, setMaxSeconds] = useState(60);
+  const [layout, setLayout] = useState<"crop" | "fit">("crop");
+  const [burnCaptions, setBurnCaptions] = useState(true);
+  const [rights, setRights] = useState(false);
+  const [pending, start] = useTransition();
+  const tooShort = video.durationSeconds !== null && video.durationSeconds < 60;
+
+  const submit = () =>
+    start(async () => {
+      const r = await createClipJobAction({ channelId, videoId: video.id, count, maxSeconds, layout, burnCaptions, confirmRights: rights });
+      if (r && !r.ok) toast.error(r.error);
+    });
+
+  return (
+    <div className="grid gap-3 rounded-lg border bg-muted/30 p-4">
+      <div>
+        <div className="flex items-center gap-2 font-medium">
+          <Scissors className="size-4" /> Turn this video into Shorts
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Gemini finds the best standalone moments; you review them, then they are cut to 9:16 with captions and land as ready-to-publish videos.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor={`clip-ch-${video.id}`}>Channel</Label>
+          <Select id={`clip-ch-${video.id}`} value={channelId} onChange={(e) => setChannelId(e.target.value)} className="w-48">
+            {channels.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor={`clip-n-${video.id}`}>Clips</Label>
+          <Select id={`clip-n-${video.id}`} value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-20">
+            {[1, 2, 3, 4, 5, 6, 8, 10, 12, 15].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor={`clip-len-${video.id}`}>Max length</Label>
+          <Select id={`clip-len-${video.id}`} value={maxSeconds} onChange={(e) => setMaxSeconds(Number(e.target.value))} className="w-28">
+            {[30, 45, 60, 90].map((n) => (
+              <option key={n} value={n}>{n} s</option>
+            ))}
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor={`clip-layout-${video.id}`}>Framing</Label>
+          <Select id={`clip-layout-${video.id}`} value={layout} onChange={(e) => setLayout(e.target.value as "crop" | "fit")} className="w-56">
+            <option value="crop">Fill 9:16, follow the speaker</option>
+            <option value="fit">Whole frame, blurred background</option>
+          </Select>
+        </div>
+        <label className="flex items-center gap-2 pb-2 text-sm">
+          <input type="checkbox" checked={burnCaptions} onChange={(e) => setBurnCaptions(e.target.checked)} /> Captions
+        </label>
+      </div>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" className="mt-1" checked={rights} onChange={(e) => setRights(e.target.checked)} />
+        I own this video or have the rights to clip and republish it.
+      </label>
+      <div>
+        <Button onClick={submit} disabled={pending || !rights || !channelId || tooShort}>
+          {pending ? <LoaderCircle className="animate-spin" /> : <Scissors />}
+          {pending ? "Finding the best moments… (up to a minute)" : "Find best moments"}
+        </Button>
+        {tooShort ? <p className="mt-2 text-xs text-muted-foreground">This video is already short.</p> : null}
+      </div>
+    </div>
   );
 }
 

@@ -78,7 +78,9 @@ export default async function StudioPage({ params, searchParams }: Params) {
   });
 
   const renderedAt = new Date();
-  const editable = EDITABLE_STATUSES.includes(project.status);
+  // A Short cut from a long video (Clips): already rendered, with no script or scenes to edit.
+  const isClip = project.scenes.length === 0 && Boolean(project.renderedVideoUrl);
+  const editable = EDITABLE_STATUSES.includes(project.status) && !isClip;
   const inFlight = IN_FLIGHT_STATUSES.includes(project.status);
   // Wan2GP clips arrive from the GPU worker on their own; poll so they show up without a reload.
   const clipsPending = scenes.some((s) => s.aiClipStatus === "QUEUED" || s.aiClipStatus === "RUNNING");
@@ -143,6 +145,7 @@ export default async function StudioPage({ params, searchParams }: Params) {
         ) : null}
       </div>
 
+      {isClip ? null : (
       <StudioToolbar
         projectId={project.id}
         editable={editable}
@@ -153,6 +156,7 @@ export default async function StudioPage({ params, searchParams }: Params) {
         renderBlocker={renderBlocker}
         autoScript={autoscript === "1"}
       />
+      )}
 
       {inFlight ? (
         <Alert variant="warning" className="mb-6">
@@ -216,7 +220,11 @@ export default async function StudioPage({ params, searchParams }: Params) {
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="grid min-w-0 gap-6">
-          <PreviewPlayer format={project.format} scenes={scenes} />
+          {isClip ? (
+            <video src={project.renderedVideoUrl!} controls preload="metadata" className="mx-auto aspect-[9/16] max-h-[640px] w-full rounded-xl bg-black" />
+          ) : (
+            <PreviewPlayer format={project.format} scenes={scenes} />
+          )}
           {project.renderedVideoUrl || project.youtubeVideoId ? (
             <Card className="gap-3">
               <CardHeader>
@@ -281,7 +289,11 @@ export default async function StudioPage({ params, searchParams }: Params) {
         </aside>
 
         <section className="grid min-w-0 gap-4" aria-label="Scenes">
-          {scenes.length === 0 ? (
+          {isClip ? (
+            <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
+              This Short was cut from a long video on the <Link href="/clips" className="underline">Clips</Link> page. Edit the title and description, then publish.
+            </div>
+          ) : scenes.length === 0 ? (
             <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
               No scenes yet. <strong className="text-foreground">Write script with Gemini</strong> turns the topic into a hook, scenes and a call to action.
             </div>

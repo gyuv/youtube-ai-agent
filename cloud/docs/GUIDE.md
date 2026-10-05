@@ -542,6 +542,25 @@ Pin it finds. Like Wan2GP, it collects work from your studio, so Lumen never con
 - Nothing happens: no scene is queued yet. Click **Find on Pinterest** on a scene.
 - Requests fail with a database error: the migration in step 1 hasn't been applied.
 
+### Turn a long video into Shorts (Clips)
+
+1. Open **Research**, paste the long video's link and click **Analyse**.
+2. Under **Turn this video into Shorts**, pick the channel, how many clips, the maximum length and the
+   framing (**Fill 9:16** crops around the speaker; **Whole frame** puts the full picture on a blurred
+   background). Tick the box confirming you own the video or have the rights to clip it, then click
+   **Find best moments**. Gemini reads the timed transcript (or watches the video when YouTube blocks the
+   transcript) and picks the strongest standalone moments, each with a title, a hook and a score.
+3. On the clip job page, play each moment, adjust its start and end (`m:ss`), rename it, untick the
+   ones you don't want, then click **Render clips**. GitHub Actions (`.github/workflows/clip-video.yml`)
+   downloads just those sections with yt-dlp, cuts them, reframes them to 1080x1920 and burns in the
+   captions. Expect a few minutes per clip.
+4. Each finished clip becomes a rendered Short in your projects: **Open to publish** takes you to its page,
+   where you edit the title and description and publish as usual.
+
+If a clip fails with "confirm you're not a bot", YouTube blocked the download from GitHub's servers. Add a
+`YOUTUBE_COOKIES` repository secret containing a Netscape-format `cookies.txt` exported from a browser
+signed in to YouTube (any "Get cookies.txt" browser extension), then render again.
+
 ## 13. Limits of the free tiers
 
 | Limit | What it means for you |

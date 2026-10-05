@@ -357,6 +357,49 @@ export function timedTextToPlain(xml: string): string {
     .trim();
 }
 
+export interface TimedSegment {
+  start: number; // seconds
+  end: number;
+  text: string;
+}
+
+const attr = (tag: string, name: string) => tag.match(new RegExp(`\\b${name}="([\\d.]+)"`))?.[1];
+
+/** Timed lines from YouTube's timedtext XML: classic `<text start dur>` (seconds) or srv3 `<p t d>` (ms). */
+export function timedTextToSegments(xml: string): TimedSegment[] {
+  const out: TimedSegment[] = [];
+  for (const m of xml.matchAll(/<(text|p)\b([^>]*)>([\s\S]*?)<\/\1>/g)) {
+    const [, tag, attrs, body] = m;
+    const ms = tag === "p";
+    const start = Number(attr(attrs, ms ? "t" : "start") ?? NaN) / (ms ? 1000 : 1);
+    const dur = Number(attr(attrs, ms ? "d" : "dur") ?? 0) / (ms ? 1000 : 1);
+    const text = decodeEntities(decodeEntities(body.replace(/<[^>]+>/g, "")))
+      .replace(/\[(?:music|applause|laughter|música|aplausos)\]/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text && Number.isFinite(start)) out.push({ start, end: start + Math.max(dur, 0.5), text });
+  }
+  // Auto-captions overlap (roll-up); end each line where the next one starts.
+  for (let i = 0; i < out.length - 1; i++) out[i].end = Math.min(out[i].end, Math.max(out[i].start + 0.3, out[i + 1].start));
+  return out;
+}
+
+/** The source-language transcript with timings, for picking clip moments. Not cached. */
+export async function getTimedTranscript(videoId: string): Promise<{ language: string; segments: TimedSegment[] }> {
+  if (!VIDEO_ID.test(videoId)) throw new PipelineError("CONFLICT", "Invalid video id.");
+  const { track } = pickTrack(await fetchCaptionTracks(videoId), "");
+  const url = new URL(track.baseUrl);
+  url.searchParams.delete("fmt");
+  const res = await fetch(url, { signal: AbortSignal.timeout(20_000) }).catch((error: unknown) => {
+    throw new TranscriptError("BLOCKED", `Could not download captions: ${errorMessage(error)}`);
+  });
+  if (res.status === 429) throw new TranscriptError("BLOCKED", "YouTube is rate-limiting caption downloads.");
+  if (!res.ok) throw new TranscriptError("UNAVAILABLE", `Caption download failed (${res.status}).`);
+  const segments = timedTextToSegments(await res.text());
+  if (!segments.length) throw new TranscriptError("NOT_FOUND", "The captions were empty.");
+  return { language: track.languageCode, segments };
+}
+
 /** A transcript in the wanted language ("" = automatic), from the cache when we have one. */
 export async function getTranscript(videoId: string, language = "", { refresh = false } = {}): Promise<Transcript> {
   if (!VIDEO_ID.test(videoId)) throw new PipelineError("CONFLICT", "Invalid video id.");
