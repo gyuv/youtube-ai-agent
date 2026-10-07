@@ -40,8 +40,9 @@ jobs:
         run: |
           set -uo pipefail
           if [[ -z "$LUMEN_URL" || -z "$PINTEREST_WORKER_SECRET" ]]; then
-            echo "::error::Add the APP_URL and PINTEREST_WORKER_SECRET repository secrets"
-            exit 1
+            echo "::warning::Skipping: add the APP_URL and PINTEREST_WORKER_SECRET repository secrets to turn on the Pinterest worker"
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           code=$(curl -sS -o pending.json -w "%{http_code}" --max-time 60 \
             -H "Authorization: Bearer $PINTEREST_WORKER_SECRET" "${LUMEN_URL%/}/api/pinterest/pending") || code=000

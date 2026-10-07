@@ -54,7 +54,11 @@ jobs:
 
             if [[ "$code" != 200 ]]; then
               failures=$((failures + 1))
-              echo "::warning::Autopilot step returned HTTP $code"
+              echo "::warning::Autopilot step returned HTTP $code: $(head -c 300 response.json 2>/dev/null)"
+              if [[ "$code" == 401 ]]; then
+                echo "::error::The app rejected RENDER_WEBHOOK_SECRET. Copy the exact RENDER_WEBHOOK_SECRET value from Vercel (Production) into this repository's secret of the same name, then re-run."
+                exit 1
+              fi
               if (( failures >= 3 )); then
                 echo "::error::Stopping after 3 failed calls in a row"
                 exit 1

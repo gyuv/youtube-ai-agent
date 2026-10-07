@@ -265,6 +265,10 @@ def topic_items(topic: str) -> tuple[str, list[str]]:
 def template_script(topic: str) -> dict:
     """An offline episode built from the topic, used only when every AI provider is down."""
     theme, items = topic_items(topic)
+    items = [i for i in items if str(i).strip()] or [theme.lower()]
+    # Repeat a short list so the episode always has enough scenes to pass parse_script's minimum.
+    while len(items) < 3:
+        items = items + items
     scenes = [
         ("Milo the cat and Coco the puppy waving hello in a bright playroom, happy smiles", "Hello friends! Welcome to Kidzulagum! I am Milo the cat. And I am Coco the puppy!"),
         ("Milo and Coco sitting together, looking excited at the viewer", f"Today we are learning about {theme.lower()}! Are you ready? Yay!"),
@@ -762,6 +766,10 @@ def main() -> None:
 
     if os.environ.get("KZ_SKIP_UPLOAD", "").lower() in {"1", "true", "yes"}:
         log("KZ_SKIP_UPLOAD is set: not uploading (download the video from the workflow artifacts).")
+        return
+    missing = [k for k in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN") if not os.environ.get(k, "").strip()]
+    if missing:
+        log(f"::warning::Not uploading: add the {', '.join(missing)} repository secret(s). The video is in the workflow artifacts.")
         return
     upload_video(video, script)
 
