@@ -32,13 +32,16 @@ export default function PrivacyPage() {
       <h2>What we access and store</h2>
       <ul>
         <li>
-          <strong>Google authorization.</strong> With your consent Lumen Cloud requests two scopes: <code>youtube.upload</code> (upload
-          videos) and <code>youtube.readonly</code> (read your channel&apos;s ID and title, and your uploaded videos&apos; visibility). The
-          OAuth access and refresh tokens are stored encrypted (AES-256-GCM).
+          <strong>Google authorization.</strong> With your consent Lumen Cloud requests four scopes: <code>youtube.upload</code> (upload
+          videos), <code>youtube.readonly</code> (read your channel&apos;s ID, title and statistics, and your videos&apos; visibility and
+          statistics), <code>yt-analytics.readonly</code> (read your channel&apos;s watch hours and Shorts views, to show progress toward
+          monetization) and <code>youtube</code> (set a channel banner you chose in the studio; Lumen uses it for nothing else). The OAuth
+          access and refresh tokens are stored encrypted (AES-256-GCM).
         </li>
         <li>
-          <strong>YouTube data.</strong> The connected channel&apos;s ID, and for each uploaded video its YouTube video ID, publish time and
-          whether YouTube kept it private. The channel title is shown once when you connect and is not stored.
+          <strong>YouTube data.</strong> The connected channel&apos;s ID; its subscriber, view and video counts, watch hours and Shorts views,
+          with a daily history used to estimate progress; and for each uploaded video its YouTube video ID, publish time, view, like and
+          comment counts, and whether YouTube kept it private. The channel title is shown once when you connect and is not stored.
         </li>
         <li>
           <strong>Content you create.</strong> Topics, scripts, titles, descriptions, tags, voice-overs, images and rendered videos, stored in

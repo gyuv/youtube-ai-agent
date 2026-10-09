@@ -71,6 +71,8 @@ export interface ScriptRequest {
   channelPrompt?: string | null;
   /** Gemini's lessons from the channel's YouTube stats (see analytics.ts). */
   performanceNotes?: string | null;
+  /** Growth goal brief and the Growth Lab mastermind's strategy (see growthGoal.ts). */
+  growth?: string | null;
 }
 
 export interface GeneratedScript {
@@ -171,6 +173,7 @@ export function buildSystemInstruction(req: ScriptRequest): string {
     "stockQuery is always in English, even when the narration is not.",
     req.channelPrompt?.trim() ? `Channel style guide from the operator:\n${req.channelPrompt.trim()}` : "",
     req.performanceNotes?.trim() ? `Lessons from this channel's YouTube performance (apply them):\n${req.performanceNotes.trim()}` : "",
+    req.growth?.trim() ?? "",
   ]
     .filter(Boolean)
     .join("\n");

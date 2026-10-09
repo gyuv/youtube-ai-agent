@@ -30,6 +30,13 @@ enum ProjectStatus {
   FAILED            // any stage failed; see lastError
 }
 
+/// What the Growth Lab mastermind optimises a channel for.
+enum GrowthGoal {
+  SUBSCRIBERS // build a returning audience: series, identity, subscribe-worthy payoffs
+  VIEWS       // reach: search and browse demand, hooks, rewatch loops
+  BALANCED
+}
+
 /// Output canvas. Both render at 1080p.
 enum VideoFormat {
   SHORT     // 9:16, 1080x1920
@@ -107,6 +114,24 @@ model Channel {
   growthReviewAt        DateTime?
   performanceNotes      String?      @db.Text
   performanceNotesAt    DateTime?
+
+  // Growth: what the channel optimises for, and the Growth Lab mastermind that steers every video.
+  growthGoal       GrowthGoal @default(BALANCED)
+  mastermind       Boolean    @default(true)
+  mastermindAt     DateTime?
+  mastermindNotes  String?    @db.Text // the current strategy, fed into topics and scripts
+
+  // Channel-level YouTube numbers for the monetization tracker.
+  subscriberCount  Int?
+  totalViews       Float? // can pass 2^31 on big channels; Float stays JSON-safe
+  youtubeVideoCount Int?
+  watchHours12m    Float? // long-form public watch hours, last 365 days (YouTube Analytics)
+  shortsViews90d   Int? // Shorts feed views, last 90 days (YouTube Analytics)
+  channelStatsAt   DateTime?
+  statsHistory     Json? // [{ at, subs, views, hours, shorts }] daily points for pace and ETA
+
+  mastermindRequests MastermindRequest[]
+  brandAssets        BrandAsset[]
 
   projects VideoProject[]
   labReports LabReport[]
@@ -291,4 +316,36 @@ model ClipJob {
   updatedAt       DateTime      @updatedAt
 
   @@index([channelId, createdAt])
+}
+
+/// Something the Growth Lab mastermind needs the operator for (YouTube allows no API for it, or it
+/// touches a live video). Everything else it does on its own.
+model MastermindRequest {
+  id         String    @id @default(cuid())
+  channelId  String
+  channel    Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  kind       String // e.g. avatar, community_post, live_video, strategy
+  title      String
+  body       String    @db.Text
+  imageUrl   String?
+  status     String    @default("open") // open | done | dismissed
+  resolvedAt DateTime?
+
+  @@index([channelId, status])
+}
+
+/// Generated channel art and community posts.
+model BrandAsset {
+  id         String    @id @default(cuid())
+  channelId  String
+  channel    Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  kind       String // avatar | banner | post
+  prompt     String    @db.Text
+  imageUrl   String?
+  text       String?   @db.Text
+  appliedAt  DateTime? // banner set on YouTube, or the operator marked it used
+
+  @@index([channelId, kind, createdAt])
 }
