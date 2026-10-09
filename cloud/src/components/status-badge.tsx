@@ -28,8 +28,8 @@ export function StatusBadge({
     meta = { label: `Scheduled · live ${when}`, tone: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/25" };
   }
   return (
-    <span className={cn("inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap", meta.tone, className)}>
-      <span className={cn("size-1.5 rounded-full bg-current", meta.pulse && "animate-pulse")} aria-hidden />
+    <span className={cn("inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap backdrop-blur", meta.tone, className)}>
+      <span className={cn("size-1.5 rounded-full bg-current shadow-[0_0_8px_currentColor]", meta.pulse && "animate-pulse")} aria-hidden />
       {meta.label}
     </span>
   );

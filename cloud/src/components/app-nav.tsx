@@ -17,7 +17,7 @@ const LINKS = [
 export function AppNav() {
   const pathname = usePathname();
   return (
-    <nav className="flex min-w-0 items-center gap-1 overflow-x-auto" aria-label="Main">
+    <nav className="scrollbar-none flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-full border bg-white/[0.03] p-1" aria-label="Main">
       {LINKS.map((link) => {
         const active = link.match(pathname);
         return (
@@ -26,8 +26,10 @@ export function AppNav() {
             href={link.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "shrink-0 rounded-md px-3 py-1.5 text-sm whitespace-nowrap transition-colors",
-              active ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+              "relative shrink-0 rounded-full px-3 py-1 text-sm whitespace-nowrap transition-all duration-200",
+              active
+                ? "bg-white/[0.08] font-medium text-foreground shadow-[inset_0_1px_0_oklch(1_0_0/10%),0_0_0_1px_oklch(0.7_0.21_292/35%),0_4px_16px_-4px_oklch(0.62_0.24_310/50%)]"
+                : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
             )}
           >
             {link.label}

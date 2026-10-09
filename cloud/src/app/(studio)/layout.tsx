@@ -9,14 +9,17 @@ import { logout } from "../login/actions";
 export default async function StudioLayout({ children }: { children: React.ReactNode }) {
   await requireOperator();
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 sm:px-6">
-          <Link href="/" className="flex items-center gap-2 font-semibold">
-            <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
+    <div className="relative min-h-screen">
+      <div className="aurora" aria-hidden />
+      <header className="sticky top-0 z-30 px-3 pt-3 sm:px-5">
+        <div className="glass mx-auto flex h-14 max-w-7xl items-center gap-3 rounded-2xl border px-3 sm:gap-4 sm:px-4">
+          <Link href="/" className="group flex shrink-0 items-center gap-2.5 font-semibold tracking-tight">
+            <span className="bg-brand relative grid size-8 place-items-center rounded-xl text-white shadow-[0_0_24px_-4px_oklch(0.62_0.24_310/80%)] transition-transform duration-300 group-hover:rotate-[-6deg] group-hover:scale-105">
               <Clapperboard className="size-4" />
             </span>
-            <span className="hidden sm:inline">Lumen Cloud</span>
+            <span className="hidden sm:inline">
+              Lumen <span className="text-gradient">Cloud</span>
+            </span>
           </Link>
           <AppNav />
           <div className="ml-auto flex items-center gap-2">
@@ -32,8 +35,8 @@ export default async function StudioLayout({ children }: { children: React.React
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">{children}</main>
-      <PolicyFooter className="mx-auto max-w-7xl border-t px-4 py-6 sm:px-6" />
+      <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6">{children}</main>
+      <PolicyFooter className="mx-auto max-w-7xl border-t border-white/5 px-4 py-6 sm:px-6" />
     </div>
   );
 }

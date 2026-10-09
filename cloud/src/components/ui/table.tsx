@@ -18,11 +18,11 @@ export function TableBody({ className, ...props }: ComponentProps<"tbody">) {
 }
 
 export function TableRow({ className, ...props }: ComponentProps<"tr">) {
-  return <tr className={cn("border-b transition-colors hover:bg-muted/40", className)} {...props} />;
+  return <tr className={cn("border-b transition-colors hover:bg-primary/[0.06]", className)} {...props} />;
 }
 
 export function TableHead({ className, ...props }: ComponentProps<"th">) {
-  return <th className={cn("h-10 px-3 text-left align-middle text-xs font-medium whitespace-nowrap text-muted-foreground", className)} {...props} />;
+  return <th className={cn("h-10 px-3 text-left align-middle text-[11px] font-medium tracking-wider whitespace-nowrap text-muted-foreground uppercase", className)} {...props} />;
 }
 
 export function TableCell({ className, ...props }: ComponentProps<"td">) {

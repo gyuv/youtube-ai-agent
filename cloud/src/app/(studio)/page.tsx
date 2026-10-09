@@ -1,8 +1,9 @@
-import { AlertTriangle, Bot, CalendarClock, Clapperboard, Cog, Radio, Youtube } from "lucide-react";
+import { AlertTriangle, Bot, CalendarClock, CalendarX2, Clapperboard, Cog, FileText, Film, ImageIcon, Lightbulb, Radio, Upload, Youtube } from "lucide-react";
 import Link from "next/link";
 import { AutomationSwitch } from "@/components/automation-switch";
 import { AutopilotPanel } from "@/components/autopilot-panel";
 import { MakeSlotButton } from "@/components/make-slot-button";
+import { RescheduleButton } from "@/components/reschedule-button";
 import { PageHeader, timeAgo } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -20,6 +21,7 @@ type Row = DashboardData["projects"][number];
 const VIEWS = {
   active: { label: "In pipeline", match: (p: Row) => ACTIVE_STATUSES.includes(p.status) },
   attention: { label: "Needs attention", match: (p: Row) => p.status === ProjectStatus.FAILED || p.youtubeLocked },
+  missed: { label: "Missed slot", match: (p: Row) => p.missedSlot },
   scheduled: { label: "Scheduled on YouTube", match: (p: Row) => Boolean(p.goesLiveAt) },
   published: { label: "Live", match: (p: Row) => p.status === ProjectStatus.PUBLISHED && !p.goesLiveAt && !p.youtubeLocked },
   all: { label: "All", match: () => true },
@@ -36,9 +38,38 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const projects = data.projects.filter((p) => VIEWS[view].match(p));
   return (
     <>
-      <PageHeader title="Dashboard" description="Every stage runs on free cloud services. Spend to date: $0.00." />
+      <PageHeader
+        title="Mission control"
+        description={
+          <>
+            Every stage runs on free cloud services. Spend to date: <span className="font-medium text-emerald-300">$0.00</span>.
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <PipelineStrip stages={data.stages} />
+
+      {data.stats.overdue > 0 ? (
+        <Link
+          href="/?view=missed"
+          className="glass glow-edge mt-6 flex animate-rise items-center gap-3 rounded-2xl border border-amber-500/25 px-4 py-3 text-sm transition-colors hover:border-amber-400/50"
+        >
+          <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-amber-500/15 text-amber-300">
+            <CalendarX2 className="size-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="font-medium text-amber-200">
+              {data.stats.overdue} video{data.stats.overdue === 1 ? "" : "s"} missed {data.stats.overdue === 1 ? "its" : "their"} posting slot.
+            </span>{" "}
+            <span className="text-muted-foreground">
+              The autopilot moves {data.stats.overdue === 1 ? "it" : "them"} to the next free slot and reuses the existing files; open the list to move {data.stats.overdue === 1 ? "it" : "one"} now.
+            </span>
+          </span>
+          <span className="hidden shrink-0 text-xs text-amber-300 sm:inline">Review →</span>
+        </Link>
+      ) : null}
+
+      <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat icon={<Clapperboard />} label="In progress" value={data.stats.inProgress} href="/?view=active" />
         <Stat icon={<Radio />} label="Rendering" value={data.stats.rendering} href="/?view=active" live={data.stats.rendering > 0} />
         <Stat icon={<AlertTriangle />} label="Needs attention" value={data.stats.needsAttention} href="/?view=attention" warn={data.stats.needsAttention > 0} />
@@ -62,11 +93,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   role="tab"
                   aria-selected={key === view}
                   className={cn(
-                    "rounded-md px-2.5 py-1 text-xs transition-colors",
-                    key === view ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+                    "rounded-full px-3 py-1 text-xs transition-all",
+                    key === view
+                      ? "bg-white/[0.08] font-medium text-foreground shadow-[0_0_0_1px_oklch(0.7_0.21_292/35%)]"
+                      : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
                   )}
                 >
                   {VIEWS[key].label}
+                  {key === "missed" && data.stats.overdue > 0 ? <span className="ml-1.5 rounded-full bg-amber-500/20 px-1.5 text-[10px] text-amber-300 tabular-nums">{data.stats.overdue}</span> : null}
                 </Link>
               ))}
             </div>
@@ -87,7 +121,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                     <TableHead>Status</TableHead>
                     <TableHead>Scenes</TableHead>
                     <TableHead className="hidden md:table-cell">Posts</TableHead>
-                    <TableHead className="hidden pr-5 text-right sm:table-cell">Updated</TableHead>
+                    <TableHead className="hidden pr-5 text-right sm:table-cell">{view === "missed" ? "" : "Updated"}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -127,14 +161,67 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
 function Stat({ icon, label, value, href, live, warn }: { icon: React.ReactNode; label: string; value: number; href: string; live?: boolean; warn?: boolean }) {
   return (
-    <Link href={href} className="group rounded-xl border bg-card p-4 transition-colors hover:border-ring/60">
-      <div className={cn("flex items-center gap-2 text-sm text-muted-foreground [&_svg]:size-4", warn && "text-red-500 dark:text-red-400")}>
-        {icon}
-        {label}
-        {live ? <span className="ml-auto size-2 animate-pulse rounded-full bg-amber-400" aria-label="live" /> : null}
+    <Link href={href} className="glass glow-edge group animate-rise rounded-2xl border p-4 transition-transform duration-300 hover:-translate-y-0.5">
+      <div className={cn("flex items-center gap-2 text-sm text-muted-foreground", warn && "text-red-300")}>
+        <span
+          className={cn(
+            "grid size-7 place-items-center rounded-lg bg-white/5 text-foreground/80 transition-colors group-hover:bg-primary/20 group-hover:text-white [&_svg]:size-3.5",
+            warn && "bg-red-500/15 text-red-300",
+          )}
+        >
+          {icon}
+        </span>
+        <span className="truncate">{label}</span>
+        {live ? <span className="ml-auto size-2 shrink-0 animate-pulse rounded-full bg-amber-400 shadow-[0_0_10px_oklch(0.8_0.15_75)]" aria-label="live" /> : null}
       </div>
-      <div className="mt-2 text-3xl font-semibold tabular-nums">{value}</div>
+      <div className={cn("mt-3 text-4xl font-semibold tracking-tight tabular-nums", value > 0 && !warn ? "text-gradient" : warn && value > 0 ? "text-red-300" : "text-foreground/70")}>{value}</div>
     </Link>
+  );
+}
+
+const STAGES = [
+  { key: "planned", label: "Planned", icon: Lightbulb, view: "active" },
+  { key: "scripted", label: "Scripted", icon: FileText, view: "active" },
+  { key: "assets", label: "Voice & visuals", icon: ImageIcon, view: "active" },
+  { key: "rendering", label: "Rendering", icon: Film, view: "active" },
+  { key: "rendered", label: "Rendered", icon: Upload, view: "active" },
+  { key: "published", label: "On YouTube", icon: Youtube, view: "published" },
+] as const;
+
+/** The whole pipeline at a glance: how many videos sit at each stage, with the flow between them. */
+function PipelineStrip({ stages }: { stages: DashboardData["stages"] }) {
+  const max = Math.max(1, ...Object.values(stages));
+  return (
+    <section aria-label="Pipeline" className="glass relative animate-rise overflow-hidden rounded-2xl border p-2">
+      <div className="pointer-events-none absolute inset-x-6 top-1/2 hidden h-px -translate-y-3 bg-gradient-to-r from-brand-1/0 via-brand-2/40 to-brand-3/0 md:block" aria-hidden>
+        <div className="shimmer h-px w-full" />
+      </div>
+      <ol className="relative grid grid-cols-3 gap-2 md:grid-cols-6">
+        {STAGES.map(({ key, label, icon: Icon, view }) => {
+          const value = stages[key];
+          return (
+            <li key={key}>
+              <Link href={`/?view=${view}`} className="group flex flex-col items-center gap-2 rounded-xl px-2 py-3 text-center transition-colors hover:bg-white/[0.04]">
+                <span
+                  className={cn(
+                    "relative grid size-10 place-items-center rounded-2xl border bg-background/80 transition-all duration-300 group-hover:scale-110",
+                    value > 0 ? "border-primary/40 text-white shadow-[0_0_24px_-6px_oklch(0.62_0.24_310/70%)]" : "text-muted-foreground",
+                    key === "rendering" && value > 0 && "animate-pulse",
+                  )}
+                >
+                  <Icon className="size-4" />
+                </span>
+                <span className="text-xl font-semibold tabular-nums">{value}</span>
+                <span className="text-[11px] tracking-wide text-muted-foreground uppercase">{label}</span>
+                <span className="h-0.5 w-10 overflow-hidden rounded-full bg-white/5" aria-hidden>
+                  <span className="bg-brand block h-full rounded-full" style={{ width: `${(value / max) * 100}%` }} />
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 
@@ -143,13 +230,18 @@ function ProjectRow({ project }: { project: Row }) {
   return (
     <TableRow className="relative">
       {/* w-full + max-w-0 lets the title column take the spare width and truncate within it. */}
-      <TableCell className="w-full max-w-0 min-w-32 pl-5">
-        <Link href={`/projects/${project.id}`} className="block truncate font-medium after:absolute after:inset-0">
+      <TableCell className="w-full max-w-0 min-w-40 pl-5">
+        <Link href={`/projects/${project.id}`} className="line-clamp-2 font-medium break-words after:absolute after:inset-0">
           {project.title ?? project.topic}
         </Link>
-        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          {project.missedSlot ? (
+            <span className="order-last basis-full sm:hidden">
+              <RescheduleButton projectId={project.id} className="h-6 px-2 text-[11px]" />
+            </span>
+          ) : null}
           {project.autopilot ? (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded border px-1 text-[10px] font-medium text-foreground" title="Created by the autopilot">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-1.5 text-[10px] font-medium text-violet-200" title="Created by the autopilot">
               <Bot className="size-3" /> Auto
             </span>
           ) : null}
@@ -161,6 +253,11 @@ function ProjectRow({ project }: { project: Row }) {
       <TableCell>
         <div className="flex items-center gap-1.5">
           <StatusBadge status={project.status} goesLiveAt={project.goesLiveAt} locked={project.youtubeLocked} timeZone={project.timeZone} />
+          {project.missedSlot ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-amber-300" title="Its posting slot passed before it reached YouTube">
+              <CalendarX2 className="size-3" /> Missed slot
+            </span>
+          ) : null}
         </div>
       </TableCell>
       <TableCell>
@@ -169,7 +266,7 @@ function ProjectRow({ project }: { project: Row }) {
         ) : (
           <div className="flex items-center gap-2" title={`${project.scenesReady} of ${project.sceneCount} scenes have voice and visual`}>
             <div className="h-1.5 w-14 overflow-hidden rounded-full bg-muted">
-              <div className={cn("h-full rounded-full", ratio === 1 ? "bg-emerald-500" : "bg-sky-500")} style={{ width: `${ratio * 100}%` }} />
+              <div className={cn("h-full rounded-full", ratio === 1 ? "bg-emerald-400 shadow-[0_0_8px_oklch(0.75_0.17_155)]" : "bg-brand")} style={{ width: `${ratio * 100}%` }} />
             </div>
             <span className="text-xs tabular-nums text-muted-foreground">
               {project.scenesReady}/{project.sceneCount}
@@ -180,7 +277,9 @@ function ProjectRow({ project }: { project: Row }) {
       <TableCell className="hidden text-xs whitespace-nowrap text-muted-foreground md:table-cell">
         {project.scheduledFor ? formatSlot(project.scheduledFor, project.timeZone) : "Not scheduled"}
       </TableCell>
-      <TableCell className="hidden pr-5 text-right text-xs whitespace-nowrap text-muted-foreground sm:table-cell">{timeAgo(project.updatedAt)}</TableCell>
+      <TableCell className="hidden pr-5 text-right text-xs whitespace-nowrap text-muted-foreground sm:table-cell">
+        {project.missedSlot ? <RescheduleButton projectId={project.id} /> : timeAgo(project.updatedAt)}
+      </TableCell>
     </TableRow>
   );
 }
@@ -217,7 +316,13 @@ function ScheduleCard({ schedule }: { schedule: DashboardData["schedule"] }) {
               <div className="mb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">{day}</div>
               <ul className="grid grid-cols-1 gap-1.5">
                 {entries.map((entry) => (
-                  <li key={`${entry.channel.id}-${entry.at.toISOString()}-${entry.project?.id ?? "open"}`} className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
+                  <li
+                    key={`${entry.channel.id}-${entry.at.toISOString()}-${entry.project?.id ?? "open"}`}
+                    className={cn(
+                      "flex items-center gap-3 rounded-xl border px-3 py-2 text-sm transition-colors hover:border-primary/30",
+                      entry.project ? "bg-white/[0.03]" : "border-dashed bg-transparent",
+                    )}
+                  >
                     <span className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
                       {new Intl.DateTimeFormat("en-GB", { timeZone: entry.channel.postingTimezone, hour: "numeric", minute: "2-digit", hour12: true }).format(entry.at)}
                     </span>
@@ -257,10 +362,12 @@ function ScheduleCard({ schedule }: { schedule: DashboardData["schedule"] }) {
 function Onboarding() {
   return (
     <div className="mx-auto max-w-xl py-16 text-center">
-      <span className="mx-auto grid size-12 place-items-center rounded-xl bg-primary text-primary-foreground">
-        <Clapperboard className="size-6" />
+      <span className="bg-brand mx-auto grid size-14 animate-rise place-items-center rounded-2xl text-white shadow-[0_0_48px_-6px_oklch(0.62_0.24_310/80%)]">
+        <Clapperboard className="size-7" />
       </span>
-      <h1 className="mt-6 text-2xl font-semibold tracking-tight">Set up your first channel</h1>
+      <h1 className="mt-6 text-3xl font-semibold tracking-tight">
+        Set up your <span className="text-gradient">first channel</span>
+      </h1>
       <p className="mt-2 text-muted-foreground">
         A channel holds your niche, voice, visual style and posting schedule. Every video you make starts from it.
       </p>
