@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { analyzeChannel, findChannelToAnalyze } from "./analytics";
 import { findChannelForGrowthReview, packageProject, runGrowthReview } from "./labsAutomation";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets, sceneNeedsFill } from "./pipeline";
+import { growthBrief } from "./growthGoal";
+import { findChannelForMastermind, runMastermind } from "./mastermind";
 import { pollMuapiClips } from "./muapi";
 import { rescheduleOverdue } from "./overdue";
 import { findVideoToAutoPublish, publishRenderedProject } from "./publish";
@@ -25,6 +27,9 @@ import { SCHEDULE_GRACE_MS } from "./youtubeVisibility";
  *   4. verify       a published video whose slot has passed really went live (not locked private)
  *   5. plan         a new video for the earliest open slot inside a channel's lead window
  *
+ * Between the daily/weekly reviews and the autopilot work, the Growth Lab mastermind (mastermind.ts)
+ * re-plans one channel at a time every few hours, on every channel that has it on.
+ *
  * Work is taken in deadline order (earliest slot first) and finished before new work starts.
  * The autopilot only ever touches projects it created, and gives up on one after
  * MAX_AUTOPILOT_FAILURES so a broken project can't burn free quotas forever. An outside service
@@ -41,7 +46,7 @@ export const PLANNING_PAUSE_MS = 12 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const VERIFY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type TickAction = "packaged" | "reviewed" | "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "waiting" | "error" | "idle";
+export type TickAction = "mastermind" | "packaged" | "reviewed" | "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "waiting" | "error" | "idle";
 
 export interface TickResult {
   action: TickAction;
@@ -72,6 +77,9 @@ type AutopilotChannel = Pick<
   | "learnFromAnalytics"
   | "performanceNotes"
   | "autoLabs"
+  | "growthGoal"
+  | "mastermind"
+  | "mastermindNotes"
 >;
 
 type WorkProject = Pick<VideoProject, "id" | "channelId" | "status" | "topic" | "title" | "autopilotFailures" | "scheduledFor"> & {
@@ -264,6 +272,7 @@ async function nextTopic(channel: AutopilotChannel): Promise<{ topic: string; so
     format: channel.defaultFormat,
     channelPrompt: channel.defaultScriptPrompt,
     performanceNotes: channel.learnFromAnalytics ? channel.performanceNotes : null,
+    growth: growthBrief("topic", channel.growthGoal, channel.mastermind ? channel.mastermindNotes : null),
     recentTopics: recent.flatMap((p) => [p.title, p.topic].filter((t): t is string => Boolean(t))),
   });
   return { topic, source: "Gemini" };
@@ -319,6 +328,22 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
     const message = `${toReview.name}: weekly Growth Lab review (${ran.join(", ") || "nothing ran"})${added.length ? `; ${added.length} new topic${added.length === 1 ? "" : "s"} added to the backlog` : ""}${failed.length ? `; skipped ${failed.join("; ").slice(0, 200)}` : ""}.`;
     await log(ran.length ? "info" : "error", "reviewed", message, ids);
     return { action: "reviewed", message, more: true, swept, ...ids };
+  }
+
+  // Every few hours per channel, autopilot or not: the Growth Lab mastermind re-plans the channel.
+  const toMaster = await findChannelForMastermind(now);
+  if (toMaster) {
+    const ids = { channelId: toMaster.id };
+    try {
+      const r = await runMastermind(toMaster, now);
+      const message = `${toMaster.name}: Growth Lab mastermind ${r.applied.length ? `changed ${r.applied.length} video${r.applied.length === 1 ? "" : "s"} (${r.applied.join("; ").slice(0, 400)})` : "kept every upcoming video"}${r.backlogAdded ? `, queued ${r.backlogAdded} topic${r.backlogAdded === 1 ? "" : "s"}` : ""}${r.requests ? `, and needs you for ${r.requests} thing${r.requests === 1 ? "" : "s"}` : ""}. ${r.diagnosis}`.slice(0, 1500);
+      await log("info", "mastermind", message, ids);
+      return { action: "mastermind", message, more: true, swept, ...ids };
+    } catch (error) {
+      const message = `${toMaster.name}: Growth Lab mastermind failed: ${errorMessage(error)}`;
+      await log("error", "mastermind", message, ids);
+      return { action: "error", message, more: true, swept, ...ids };
+    }
   }
 
   const channels = await prisma.channel.findMany({ where: { autopilot: true, isActive: true } });

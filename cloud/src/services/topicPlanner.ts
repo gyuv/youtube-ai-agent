@@ -19,6 +19,8 @@ export interface TopicRequest {
   channelPrompt?: string | null;
   /** Gemini's lessons from the channel's YouTube stats (see analytics.ts). */
   performanceNotes?: string | null;
+  /** Growth goal brief and the Growth Lab mastermind's strategy (see growthGoal.ts). */
+  growth?: string | null;
   /** Newest first. The planner must not repeat or paraphrase these. */
   recentTopics: string[];
 }
@@ -32,6 +34,7 @@ export function buildTopicPrompt(req: TopicRequest): { system: string; prompt: s
     "Avoid clickbait that the video can't deliver, medical or financial advice framed as instructions, and anything about real private individuals.",
     req.channelPrompt?.trim() ? `Channel style guide:\n${req.channelPrompt.trim()}` : "",
     req.performanceNotes?.trim() ? `Lessons from this channel's YouTube performance (apply them):\n${req.performanceNotes.trim()}` : "",
+    req.growth?.trim() ?? "",
   ]
     .filter(Boolean)
     .join("\n");

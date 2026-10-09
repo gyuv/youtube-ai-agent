@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarX2, Clapperboard, Radio, Rocket, Sparkles, TriangleAlert } from "lucide-react";
+import { Brain, CalendarX2, Clapperboard, Radio, Rocket, Sparkles, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -33,12 +33,13 @@ export interface NowData {
   nextLive: { id: string; title: string; at: string; atLabel: string; thumbnail: string | null } | null;
   missed: number;
   attention: number;
+  asks: number;
 }
 
 /** The top of mission control: what is happening this minute, and what happens next. */
 export function NowStrip({ data }: { data: NowData }) {
   const now = useNow();
-  const calm = data.rendering.length === 0 && !data.nextLive && data.missed === 0 && data.attention === 0;
+  const calm = data.rendering.length === 0 && !data.nextLive && data.missed === 0 && data.attention === 0 && data.asks === 0;
 
   return (
     <section aria-label="Right now" className="grid animate-rise grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
@@ -98,7 +99,7 @@ export function NowStrip({ data }: { data: NowData }) {
         </div>
 
         {/* Things that need a human. */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <Link
             href="/?view=missed#board"
             className={cn("glass rounded-2xl border p-3 transition-colors hover:border-amber-400/40", data.missed > 0 && "border-amber-500/30 bg-amber-500/[0.06]")}
@@ -116,6 +117,16 @@ export function NowStrip({ data }: { data: NowData }) {
               <TriangleAlert className={cn("size-3.5", data.attention > 0 && "text-red-300")} /> Need you
             </div>
             <div className={cn("mt-1 text-2xl font-semibold tabular-nums", data.attention > 0 ? "text-red-200" : "text-foreground/50")}>{data.attention}</div>
+          </Link>
+          <Link
+            href="/growth-lab"
+            className={cn("glass rounded-2xl border p-3 transition-colors hover:border-primary/40", data.asks > 0 && "border-primary/40 bg-primary/[0.08]")}
+            title="Things the Growth Lab mastermind needs you to do"
+          >
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Brain className={cn("size-3.5", data.asks > 0 && "text-violet-300")} /> <span className="truncate">Mastermind asks</span>
+            </div>
+            <div className={cn("mt-1 text-2xl font-semibold tabular-nums", data.asks > 0 ? "text-violet-200" : "text-foreground/50")}>{data.asks}</div>
           </Link>
         </div>
       </div>

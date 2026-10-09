@@ -50,6 +50,7 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
     recentAutopilotEvents(20),
     countOverdue(now),
   ]);
+  const mastermindAsks = await prisma.mastermindRequest.count({ where: { status: "open" } });
 
   const counts = Object.fromEntries(byStatus.map((row) => [row.status, row._count._all])) as Partial<Record<ProjectStatus, number>>;
   const count = (...statuses: ProjectStatus[]) => statuses.reduce((sum, s) => sum + (counts[s] ?? 0), 0);
@@ -63,6 +64,7 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
       needsAttention: count(ProjectStatus.FAILED) + lockedPrivate,
       publishedThisMonth,
       overdue,
+      mastermindAsks,
       scheduledOnYouTube: projects.filter((p) => p.status === ProjectStatus.PUBLISHED && !p.youtubeLocked && p.scheduledFor && p.scheduledFor > now).length,
     },
     projects: projects.map((p) => ({

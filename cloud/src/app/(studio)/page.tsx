@@ -102,6 +102,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           nextLive: next ? { id: next.id, title: next.title, at: next.at.toISOString(), atLabel: formatSlot(next.at, homeZone), thumbnail: next.thumbnail } : null,
           missed: data.stats.overdue,
           attention: data.stats.needsAttention,
+          asks: data.stats.mastermindAsks,
         }}
       />
 
