@@ -7,6 +7,7 @@ import { requireOperator } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { createVideoNow, createVideosAhead } from "@/services/autopilot";
 import { setFullAutomation } from "@/services/channels";
+import { clearAutopilotEvents, rescheduleProject } from "@/services/overdue";
 import { dispatchAutopilotRun } from "@/services/renderDispatcher";
 
 /** Start the autopilot workflow now instead of waiting for its next scheduled run. */
@@ -84,6 +85,26 @@ export async function makeSlotNowAction(channelId: string, atIso: string): Promi
     }
     return { projectId: created.projectId, topic: created.topic, autopilot: created.autopilot, runError };
   });
+  revalidatePath("/");
+  return result;
+}
+
+/** Move a video that missed its slot (or gave up) to the channel's next free slot, keeping its files. */
+export async function rescheduleProjectAction(projectId: string): Promise<ActionResult<{ message: string }>> {
+  await requireOperator();
+  const result = await toActionResult(async () => {
+    const { message } = await rescheduleProject(z.string().min(1).parse(projectId));
+    return { message };
+  });
+  revalidatePath("/");
+  revalidatePath(`/projects/${projectId}`);
+  return result;
+}
+
+/** Empty the dashboard's autopilot activity feed. */
+export async function clearAutopilotActivityAction(): Promise<ActionResult<{ cleared: number }>> {
+  await requireOperator();
+  const result = await toActionResult(async () => ({ cleared: await clearAutopilotEvents() }));
   revalidatePath("/");
   return result;
 }

@@ -19,6 +19,7 @@ vi.mock("./youtube", () => youtube);
 vi.mock("./publish", () => publish);
 vi.mock("./analytics", () => analytics);
 vi.mock("./labsAutomation", () => labs);
+vi.mock("./overdue", () => ({ rescheduleOverdue: vi.fn(async () => 0) }));
 
 import { MAX_AUTOPILOT_FAILURES, PINTEREST_WAIT_MS, PROVIDER_RETRY_MS, autopilotTick, createVideoNow, createVideosAhead } from "./autopilot";
 

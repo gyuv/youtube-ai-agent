@@ -2,6 +2,7 @@ import { ProjectStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { recentAutopilotEvents } from "./autopilot";
 import { sceneHasAssets } from "./pipeline";
+import { OVERDUE_GRACE_MS, RESCHEDULABLE_STATUSES, countOverdue } from "./overdue";
 import { buildSchedule } from "./schedule";
 
 export const ACTIVE_STATUSES: ProjectStatus[] = [
@@ -15,7 +16,8 @@ export const ACTIVE_STATUSES: ProjectStatus[] = [
 
 export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
   const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const [channels, projects, byStatus, publishedThisMonth, lockedPrivate, scheduled, events] = await Promise.all([
+  const missedBy = new Date(now.getTime() - OVERDUE_GRACE_MS);
+  const [channels, projects, byStatus, publishedThisMonth, lockedPrivate, scheduled, events, overdue] = await Promise.all([
     prisma.channel.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.videoProject.findMany({
       orderBy: { updatedAt: "desc" },
@@ -35,7 +37,8 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
       where: { scheduledFor: { gte: now } },
       select: { id: true, channelId: true, title: true, topic: true, status: true, scheduledFor: true, youtubeLocked: true },
     }),
-    recentAutopilotEvents(8),
+    recentAutopilotEvents(20),
+    countOverdue(now),
   ]);
 
   const counts = Object.fromEntries(byStatus.map((row) => [row.status, row._count._all])) as Partial<Record<ProjectStatus, number>>;
@@ -49,6 +52,7 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
       // Failed videos, and published ones YouTube kept private.
       needsAttention: count(ProjectStatus.FAILED) + lockedPrivate,
       publishedThisMonth,
+      overdue,
       scheduledOnYouTube: projects.filter((p) => p.status === ProjectStatus.PUBLISHED && !p.youtubeLocked && p.scheduledFor && p.scheduledFor > now).length,
     },
     projects: projects.map((p) => ({
@@ -66,9 +70,21 @@ export async function getDashboard(now: Date = new Date(), scheduleDays = 7) {
       youtubeLocked: p.status === ProjectStatus.PUBLISHED && p.youtubeLocked,
       // On YouTube but held until its slot.
       goesLiveAt: p.status === ProjectStatus.PUBLISHED && !p.youtubeLocked && p.scheduledFor && p.scheduledFor > now ? p.scheduledFor : null,
+      // Its slot passed before it reached YouTube; the autopilot (or the operator) moves it on.
+      missedSlot: Boolean(p.scheduledFor && p.scheduledFor < missedBy && !p.youtubeVideoId && RESCHEDULABLE_STATUSES.includes(p.status)),
+      autopilotFailures: p.autopilotFailures,
       scenesReady: p.scenes.filter(sceneHasAssets).length,
       sceneCount: p.scenes.length,
     })),
+    // How many videos sit at each stage, for the pipeline strip.
+    stages: {
+      planned: count(ProjectStatus.DRAFT),
+      scripted: count(ProjectStatus.SCRIPTED),
+      assets: count(ProjectStatus.ASSETS_READY),
+      rendering: count(ProjectStatus.QUEUED_FOR_RENDER, ProjectStatus.RENDERING),
+      rendered: count(ProjectStatus.RENDERED),
+      published: count(ProjectStatus.PUBLISHED),
+    },
     schedule: buildSchedule(channels, scheduled, now, scheduleDays),
     autopilot: {
       channelsOn: channels.filter((c) => c.autopilot && c.isActive).length,
