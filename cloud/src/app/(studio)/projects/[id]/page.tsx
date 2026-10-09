@@ -1,11 +1,14 @@
-import { Bot, ChevronLeft, CircleAlert, ExternalLink, Github, Lock, Radio, Youtube } from "lucide-react";
+import { Bot, CalendarX2, ChevronLeft, CircleAlert, ExternalLink, Github, Lock, Radio, Youtube } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { timeAgo } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
+import { cn } from "@/lib/utils";
+import { RescheduleButton } from "@/components/reschedule-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { OVERDUE_GRACE_MS, RESCHEDULABLE_STATUSES } from "@/services/overdue";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProjectStatus } from "@/generated/prisma/enums";
 import { EDITABLE_STATUSES, IN_FLIGHT_STATUSES, RENDERABLE_STATUSES } from "@/lib/statuses";
@@ -105,6 +108,9 @@ export default async function StudioPage({ params, searchParams }: Params) {
     runUrl = null; // GitHub env not configured on this deployment
   }
   const totalSeconds = scenes.reduce((sum, s) => sum + s.durationSeconds, 0);
+  const missedSlot = Boolean(
+    project.scheduledFor && project.scheduledFor.getTime() < renderedAt.getTime() - OVERDUE_GRACE_MS && !project.youtubeVideoId && RESCHEDULABLE_STATUSES.includes(project.status),
+  );
 
   return (
     <>
@@ -138,9 +144,9 @@ export default async function StudioPage({ params, searchParams }: Params) {
           {project.title ? <p className="mt-1 text-sm text-muted-foreground">{project.topic}</p> : null}
         </div>
         {project.scheduledFor ? (
-          <div className="rounded-lg border px-3 py-2 text-sm">
-            <div className="text-xs text-muted-foreground">Scheduled</div>
-            {formatSlot(project.scheduledFor, project.channel.postingTimezone)}
+          <div className={cn("glass rounded-xl border px-3 py-2 text-sm", missedSlot && "border-amber-500/30")}>
+            <div className="text-xs text-muted-foreground">{missedSlot ? "Missed slot" : "Scheduled"}</div>
+            <span className={cn(missedSlot && "text-amber-300 line-through decoration-amber-500/50")}>{formatSlot(project.scheduledFor, project.channel.postingTimezone)}</span>
           </div>
         ) : null}
       </div>
@@ -157,6 +163,20 @@ export default async function StudioPage({ params, searchParams }: Params) {
         autoScript={autoscript === "1"}
       />
       )}
+
+      {missedSlot ? (
+        <Alert variant="warning" className="mb-6">
+          <CalendarX2 />
+          <AlertTitle>This video missed its posting slot</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              Its script, voice, visuals{project.renderedVideoUrl ? " and render" : ""} are kept. Move it to the channel&apos;s next free slot and it carries on from here
+              {project.autopilot ? "; the autopilot also does this on its next run unless it gave up on the video" : ""}.
+            </span>
+            <RescheduleButton projectId={project.id} label="Move to next slot" />
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {inFlight ? (
         <Alert variant="warning" className="mb-6">

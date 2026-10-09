@@ -12,7 +12,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" className="dark">
       <body className="min-h-screen font-sans">
         {children}
-        <Toaster theme="dark" position="bottom-right" richColors closeButton />
+        <Toaster theme="dark" position="bottom-right" richColors closeButton toastOptions={{ className: "!rounded-xl !border-white/10 !bg-[oklch(0.19_0.022_285)]/90 !backdrop-blur-xl" }} />
       </body>
     </html>
   );

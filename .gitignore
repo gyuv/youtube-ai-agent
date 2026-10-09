@@ -91,3 +91,5 @@ data/thumbnails/
 # Claude worktrees
 .claude/worktrees/
 data/openshorts/
+__pycache__/
+*.pyc

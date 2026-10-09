@@ -1,0 +1,7 @@
+# Python dependencies for google_flow_pipeline.py
+# Also requires the ffmpeg binary on PATH (e.g. apt install ffmpeg / brew install ffmpeg).
+google-cloud-texttospeech>=2.14,<3
+google-cloud-storage>=2.10,<4
+pydub>=0.25.1,<1
+# pydub imports audioop, which was removed from the stdlib in Python 3.13
+audioop-lts>=0.2.1; python_version >= "3.13"

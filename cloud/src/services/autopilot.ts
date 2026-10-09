@@ -6,6 +6,7 @@ import { analyzeChannel, findChannelToAnalyze } from "./analytics";
 import { findChannelForGrowthReview, packageProject, runGrowthReview } from "./labsAutomation";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets, sceneNeedsFill } from "./pipeline";
 import { pollMuapiClips } from "./muapi";
+import { rescheduleOverdue } from "./overdue";
 import { findVideoToAutoPublish, publishRenderedProject } from "./publish";
 import { firstFreeSlot, formatSlot, isValidCron } from "./schedule";
 import { proposeTopic } from "./topicPlanner";
@@ -16,7 +17,8 @@ import { SCHEDULE_GRACE_MS } from "./youtubeVisibility";
  * The autopilot. A GitHub Actions workflow calls `autopilotTick` repeatedly; each call does at
  * most ONE unit of work (well inside a serverless time limit) and says whether more remains:
  *
- *   0. housekeeping: fail renders that stopped reporting, prune the activity log
+ *   0. housekeeping: fail renders that stopped reporting, move videos that missed their slot to
+ *      the next free one (keeping their files), prune the activity log
  *   1. dispatch     an autopilot video whose assets are complete (or retry a failed render)
  *   2. fill         one missing voice/visual on an autopilot video
  *   3. script       an autopilot video that has only a topic
@@ -269,6 +271,8 @@ async function nextTopic(channel: AutopilotChannel): Promise<{ topic: string; so
 
 export async function autopilotTick(now: Date = new Date()): Promise<TickResult> {
   const swept = await sweepStaleRenders(now);
+  // Before publishing or planning, so a missed video takes the next slot instead of a new one.
+  await rescheduleOverdue(now, MAX_AUTOPILOT_FAILURES);
   await pollMuapiClips(undefined, now).catch((error) => console.error("Muapi poll failed", error));
 
   // Rendered videos waiting for YouTube go first: on auto-publish channels they shouldn't sit idle,
