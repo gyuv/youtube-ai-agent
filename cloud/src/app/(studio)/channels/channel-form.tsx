@@ -260,6 +260,10 @@ export function ChannelForm({ channelId, initial, youtubeConnected }: { channelI
                   <option value="PEXELS">Stock B-roll (Pexels)</option>
                   <option value="PINTEREST">Pinterest video Pins (worker)</option>
                 </Select>
+                <FieldHint>
+                  Looking for Google Flow? It animates each video&apos;s hook on top of these visuals: turn it on in the Google Flow card on this
+                  channel&apos;s page{initial ? "" : " once the channel is saved"}.
+                </FieldHint>
               </Field>
             </div>
             <div className="grid gap-2 rounded-lg border p-3">
