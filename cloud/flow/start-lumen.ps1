@@ -34,8 +34,10 @@ if ($args -contains "-Reset") {
 }
 
 # 1. Settings, asked once and remembered for this Windows user.
-function Setting($name, $prompt, $default = "", $pattern = ".") {
+function Setting($name, $prompt, $default = "", $pattern = ".", [switch]$Quiet) {
   $value = [Environment]::GetEnvironmentVariable($name, "User")
+  # Settings with a known default never ask: the default is used and remembered.
+  if ($Quiet -and (-not $value -or "$value".Trim() -notmatch $pattern)) { $value = $default; [Environment]::SetEnvironmentVariable($name, $value, "User") }
   # A saved value that doesn't look right (e.g. a pasted command) is asked for again.
   if ($value -and "$value".Trim() -notmatch $pattern) {
     Write-Host "The saved $name doesn't look right ('$value'); please enter it again." -ForegroundColor Yellow
@@ -56,9 +58,9 @@ function Setting($name, $prompt, $default = "", $pattern = ".") {
   }
   Set-Item -Path "Env:$name" -Value "$value".Trim()
 }
-Setting "LUMEN_URL" "Your studio address" "https://youtube-ai-agent-cloud.vercel.app" '^https?://\S+$'
+Setting "LUMEN_URL" "Your studio address" "https://youtube-ai-agent-cloud.vercel.app" '^https?://\S+$' -Quiet
 Setting "FLOW_WORKER_SECRET" "FLOW_WORKER_SECRET (the same value as in Vercel)" "" '^\S{32,}$'
-Setting "FLOW_DAILY_CREDITS" "Google Flow credits you can spend per day" "1000" '^\d+$'
+Setting "FLOW_DAILY_CREDITS" "Google Flow credits you can spend per day" "1000" '^\d+$' -Quiet
 Say "Settings loaded (to change them later: run with -Reset)."
 
 # 2. Node.js must be installed.
