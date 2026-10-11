@@ -27,11 +27,26 @@ export type VideoScene = {
   words: CaptionWord[];
 };
 
+/** A channel's branding: a frame around every scene, an intro card and a subscribe outro. */
+export type VideoBrand = {
+  name: string;
+  /** Accent colour, CSS. */
+  color: string;
+  /** The channel's profile picture, if it has one. */
+  avatarSrc: string | null;
+  /** Outro call to action. */
+  cta: string;
+};
+
 export type LumenVideoProps = {
   format: VideoFormat;
   scenes: VideoScene[];
   captions: boolean;
+  brand?: VideoBrand | null;
 };
+
+export const INTRO_FRAMES = 45; // 1.5 s
+export const OUTRO_FRAMES = 90; // 3 s
 
 export function dimensionsFor(format: VideoFormat): { width: number; height: number } {
   return format === "SHORT" ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
@@ -51,8 +66,9 @@ export function sceneSlots(scenes: Pick<VideoScene, "durationSeconds">[]): Array
   return slots;
 }
 
-export function totalFrames(scenes: Pick<VideoScene, "durationSeconds">[]): number {
-  return Math.max(1, scenes.reduce((sum, scene) => sum + sceneFrames(scene.durationSeconds), 0));
+export function totalFrames(scenes: Pick<VideoScene, "durationSeconds">[], brand?: VideoBrand | null): number {
+  const body = scenes.reduce((sum, scene) => sum + sceneFrames(scene.durationSeconds), 0);
+  return Math.max(1, body + (brand ? INTRO_FRAMES + OUTRO_FRAMES : 0));
 }
 
 export type CaptionPage = {

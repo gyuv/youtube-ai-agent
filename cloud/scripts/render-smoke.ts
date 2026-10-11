@@ -24,6 +24,7 @@ const SECRET = "smoke-test-secret-that-is-at-least-32-chars";
 const PROJECT_ID = "csmoketest0000000000000001";
 const format = (process.env.SMOKE_FORMAT === "LONG_FORM" ? "LONG_FORM" : "SHORT") as VideoFormat;
 const [width, height] = format === "SHORT" ? [1080, 1920] : [1920, 1080];
+const SMOKE_BRAND = format === "SHORT" ? { name: "Kidz Ulagam", color: "#FFB703", avatarUrl: null, cta: "Subscribe for a new story every day!" } : null;
 
 function ffmpeg(args: string[]) {
   const compositorDir = path.dirname(require.resolve("@remotion/compositor-linux-x64-gnu"));
@@ -115,6 +116,8 @@ async function main() {
           projectId: PROJECT_ID,
           format,
           captions: true,
+          // Shorts also exercise the channel branding (intro card, frame, subscribe outro).
+          brand: SMOKE_BRAND,
           maxBytes: 50 * 1024 * 1024,
           upload: { url: `${base}/upload/video.mp4`, method: "PUT", headers: { "Content-Type": "video/mp4" } },
           scenes: [
@@ -146,7 +149,7 @@ async function main() {
     );
 
     const meta = await getVideoMetadata(uploadPath);
-    const expectedSeconds = totalFrames([{ durationSeconds: 2.2 }, { durationSeconds: 2.0 }]) / FPS;
+    const expectedSeconds = totalFrames([{ durationSeconds: 2.2 }, { durationSeconds: 2.0 }], SMOKE_BRAND ? { ...SMOKE_BRAND, avatarSrc: null } : null) / FPS;
     const checks: Array<[string, boolean]> = [
       ["webhook sequence is started -> rendered", events.map((e) => e.event).join(",") === "started,rendered"],
       ["worker reported rendered", result.outcome === "rendered"],

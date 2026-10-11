@@ -58,6 +58,8 @@ export interface RenderJob {
   format: "SHORT" | "LONG_FORM";
   captions: boolean;
   scenes: RenderJobScene[];
+  /** The channel's branded frame, intro and outro; absent for channels without one. */
+  brand?: { name: string; color: string; avatarUrl: string | null; cta: string } | null;
   upload: { url: string; method: "PUT"; headers: Record<string, string> };
   /** Storage object limit; the worker sizes the bitrate to fit under it. */
   maxBytes: number;

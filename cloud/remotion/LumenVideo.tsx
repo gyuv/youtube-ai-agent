@@ -11,7 +11,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { FPS, paginateCaptions, sceneSlots, type LumenVideoProps, type VideoFormat, type VideoScene } from "./timeline";
+import { FPS, INTRO_FRAMES, OUTRO_FRAMES, paginateCaptions, sceneSlots, type LumenVideoProps, type VideoBrand, type VideoFormat, type VideoScene } from "./timeline";
 
 /** Font family registered by Root.tsx for renders (and by the studio for previews). */
 export const CAPTION_FONT_FAMILY = "LumenCaption";
@@ -104,15 +104,90 @@ function SceneView({ scene, index, format, captions }: { scene: VideoScene; inde
   );
 }
 
-export function LumenVideo({ format, scenes, captions }: LumenVideoProps) {
+const brandFont = `${CAPTION_FONT_FAMILY}, sans-serif`;
+
+function Avatar({ brand, size }: { brand: VideoBrand; size: number }) {
+  return brand.avatarSrc ? (
+    <Img src={resolveSrc(brand.avatarSrc)} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: `${Math.round(size / 18)}px solid white` }} />
+  ) : (
+    <div style={{ width: size, height: size, borderRadius: "50%", background: brand.color, border: `${Math.round(size / 18)}px solid white`, display: "grid", placeItems: "center", fontFamily: brandFont, fontWeight: 800, fontSize: size * 0.42, color: "white" }}>
+      {brand.name.slice(0, 1).toUpperCase()}
+    </div>
+  );
+}
+
+/** 1.5 s opener: the channel's badge pops in over its colour, then the first scene starts. */
+function BrandIntro({ brand, format }: { brand: VideoBrand; format: VideoFormat }) {
+  const frame = useCurrentFrame();
+  const pop = interpolate(frame, [0, 10, 16], [0.4, 1.12, 1], { extrapolateRight: "clamp" });
+  const fade = interpolate(frame, [INTRO_FRAMES - 8, INTRO_FRAMES], [1, 0], { extrapolateLeft: "clamp" });
+  const big = format === "SHORT" ? 1 : 0.8;
+  return (
+    <AbsoluteFill style={{ background: `radial-gradient(circle at 50% 40%, white 0%, ${brand.color} 55%, #ff6b6b 100%)`, opacity: fade, justifyContent: "center", alignItems: "center", gap: 40 * big }}>
+      <div style={{ transform: `scale(${pop})` }}>
+        <Avatar brand={brand} size={320 * big} />
+      </div>
+      <div style={{ transform: `scale(${pop})`, fontFamily: brandFont, fontWeight: 800, fontSize: 120 * big, color: "white", WebkitTextStroke: "12px #1d3557", paintOrder: "stroke fill", textAlign: "center" }}>
+        {brand.name}
+      </div>
+    </AbsoluteFill>
+  );
+}
+
+/** Around every scene: a rounded colour border and the channel badge at the top. */
+function BrandFrame({ brand, format }: { brand: VideoBrand; format: VideoFormat }) {
+  const edge = format === "SHORT" ? 18 : 14;
+  return (
+    <AbsoluteFill style={{ pointerEvents: "none" }}>
+      <AbsoluteFill style={{ border: `${edge}px solid ${brand.color}`, borderRadius: edge * 3, boxShadow: "inset 0 0 40px rgba(0,0,0,0.35)" }} />
+      <div style={{ position: "absolute", top: edge * 3, left: edge * 3, display: "flex", alignItems: "center", gap: 18, padding: "10px 28px 10px 10px", borderRadius: 999, background: "rgba(0,0,0,0.45)" }}>
+        <Avatar brand={brand} size={format === "SHORT" ? 96 : 72} />
+        <span style={{ fontFamily: brandFont, fontWeight: 800, fontSize: format === "SHORT" ? 46 : 36, color: "white" }}>{brand.name}</span>
+      </div>
+    </AbsoluteFill>
+  );
+}
+
+/** 3 s closer: the badge, the name and a pulsing subscribe button. */
+function BrandOutro({ brand, format }: { brand: VideoBrand; format: VideoFormat }) {
+  const frame = useCurrentFrame();
+  const rise = interpolate(frame, [0, 12], [80, 0], { extrapolateRight: "clamp" });
+  const pulse = 1 + 0.06 * Math.sin((frame / FPS) * Math.PI * 2);
+  const big = format === "SHORT" ? 1 : 0.75;
+  return (
+    <AbsoluteFill style={{ background: `linear-gradient(160deg, ${brand.color}, #ff6b6b)`, justifyContent: "center", alignItems: "center", gap: 44 * big, transform: `translateY(${rise}px)` }}>
+      <Avatar brand={brand} size={260 * big} />
+      <div style={{ fontFamily: brandFont, fontWeight: 800, fontSize: 96 * big, color: "white", WebkitTextStroke: "10px #1d3557", paintOrder: "stroke fill", textAlign: "center" }}>{brand.name}</div>
+      <div style={{ transform: `scale(${pulse})`, background: "#e63946", color: "white", fontFamily: brandFont, fontWeight: 800, fontSize: 72 * big, padding: `${24 * big}px ${64 * big}px`, borderRadius: 999, boxShadow: "0 12px 30px rgba(0,0,0,0.3)" }}>
+        SUBSCRIBE
+      </div>
+      <div style={{ fontFamily: brandFont, fontWeight: 800, fontSize: 48 * big, color: "white", textAlign: "center", paddingInline: 80 }}>{brand.cta}</div>
+    </AbsoluteFill>
+  );
+}
+
+export function LumenVideo({ format, scenes, captions, brand }: LumenVideoProps) {
   const slots = sceneSlots(scenes);
+  const offset = brand ? INTRO_FRAMES : 0;
+  const bodyEnd = offset + (slots.at(-1) ? slots.at(-1)!.from + slots.at(-1)!.durationInFrames : 0);
   return (
     <AbsoluteFill style={{ backgroundColor: "black" }}>
+      {brand ? (
+        <Sequence from={0} durationInFrames={INTRO_FRAMES}>
+          <BrandIntro brand={brand} format={format} />
+        </Sequence>
+      ) : null}
       {scenes.map((scene, index) => (
-        <Sequence key={index} from={slots[index].from} durationInFrames={slots[index].durationInFrames} premountFor={FPS}>
+        <Sequence key={index} from={offset + slots[index].from} durationInFrames={slots[index].durationInFrames} premountFor={FPS}>
           <SceneView scene={scene} index={index} format={format} captions={captions} />
+          {brand ? <BrandFrame brand={brand} format={format} /> : null}
         </Sequence>
       ))}
+      {brand ? (
+        <Sequence from={bodyEnd} durationInFrames={OUTRO_FRAMES}>
+          <BrandOutro brand={brand} format={format} />
+        </Sequence>
+      ) : null}
     </AbsoluteFill>
   );
 }

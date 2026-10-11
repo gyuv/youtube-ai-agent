@@ -46,7 +46,7 @@ export function PreviewPlayer({ format, scenes }: { format: VideoFormat; scenes:
       <Player
         component={LumenVideo}
         inputProps={inputProps}
-        durationInFrames={totalFrames(inputProps.scenes)}
+        durationInFrames={totalFrames(inputProps.scenes, inputProps.brand)}
         compositionWidth={width}
         compositionHeight={height}
         fps={FPS}

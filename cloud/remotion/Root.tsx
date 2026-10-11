@@ -16,7 +16,7 @@ Promise.all([
 
 const calculateMetadata: CalculateMetadataFunction<LumenVideoProps> = ({ props }) => ({
   ...dimensionsFor(props.format),
-  durationInFrames: totalFrames(props.scenes),
+  durationInFrames: totalFrames(props.scenes, props.brand),
   fps: FPS,
 });
 
