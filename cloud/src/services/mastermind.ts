@@ -8,7 +8,8 @@ import { rankPerformance, type PerformanceRow } from "./analytics";
 import { generateGeminiJson, parseJsonText, sanitizeSchema, type GeminiClient } from "./gemini";
 import { GOAL_LABEL } from "./growthGoal";
 import { addTopicsToBacklog } from "./labsAutomation";
-import { CHANNEL_STATS_INTERVAL_MS, describeProgress, monetizationProgress, refreshMonetizationStats } from "./monetization";
+import { CHANNEL_STATS_INTERVAL_MS, describeProgress, fetchVideoRetention, hasAnalyticsScope, monetizationProgress, refreshMonetizationStats } from "./monetization";
+import { getChannelAccessToken } from "./youtube";
 import { generateProjectScript } from "./pipeline";
 
 /**
@@ -52,6 +53,13 @@ const PlanSchema = z.object({
     .describe("6-10 bullet lines starting with '- ': the channel's growth strategy right now. Concrete rules for topics, hooks, titles, thumbnails text, pacing, series and calls to action. Every future script follows it."),
   diagnosis: z.string().max(600).describe("Two or three sentences: what is holding the channel back from monetization and the single biggest lever."),
   decisions: z.array(DecisionSchema).max(MAX_CANDIDATES).describe("One entry per upcoming video you want to change. Omit videos you would keep."),
+  postsPerDay: z
+    .number()
+    .int()
+    .min(1)
+    .max(3)
+    .optional()
+    .describe("Daily posting cadence to switch the channel to (1-3 Shorts a day). Only set it when you want to change the current cadence."),
   backlog: z.array(z.string().min(8).max(200)).max(6).describe("New video topics, strongest first, phrased like a searcher would type them."),
   requests: z
     .array(
@@ -65,6 +73,16 @@ const PlanSchema = z.object({
     .describe("Only things the system cannot do itself: setting the profile picture, posting a community post, changing a video that is already live, or anything needing a human. Leave empty when nothing is needed."),
 });
 export type MastermindPlan = z.infer<typeof PlanSchema>;
+
+/** Posting times (channel time zone) for each daily cadence the mastermind may pick. */
+export const CADENCE_CRON: Record<number, string> = { 1: "0 17 * * *", 2: "0 12,18 * * *", 3: "0 9,14,19 * * *" };
+
+/** How many posts a day a cron expression schedules, if it is a plain daily one. */
+export function postsPerDay(cron: string): number | null {
+  const [min, hour, dom, mon, dow] = cron.trim().split(/\s+/);
+  if (!min || !hour || dom !== "*" || mon !== "*" || dow !== "*" || !/^[\d,]+$/.test(hour)) return null;
+  return hour.split(",").length;
+}
 const PLAN_JSON_SCHEMA = sanitizeSchema(z.toJSONSchema(PlanSchema));
 
 export interface Candidate {
@@ -86,6 +104,9 @@ export function buildMastermindPrompt(input: {
   candidates: Candidate[];
   uploads90d: number;
   now: Date;
+  /** Per-video retention lines from YouTube Analytics, when available. */
+  retention?: string[];
+  cadence?: number | null;
 }): { system: string; prompt: string } {
   const { channel, candidates, ranking } = input;
   const system = [
@@ -97,6 +118,8 @@ export function buildMastermindPrompt(input: {
       : "",
     "Be decisive and aggressive about what actually moves views and subscribers: hooks in the first two seconds, curiosity-driven but honest titles, strong thumbnail text, series that bring viewers back, topics with real demand, Shorts that funnel into long-form, consistent posting.",
     "Hard limits, because breaking them gets a channel refused or demonetized: never mislead (a title or hook must be delivered by the video), no fake engagement, sub-for-sub, giveaways for subscribers or bought views, no reused or near-duplicate content, nothing harmful, no medical or financial instructions, nothing about real private people.",
+    "Read retention like a pro: a Short under ~70% average viewed loses the feed in its first two seconds, so fix the hook and the first frame; a Short over 90% that still gets few views has a weak topic or title, so change the topic. Subscribers gained per video show which series to repeat. Double down on whatever already works and drop what doesn't, fast.",
+    "A new channel's reach comes from volume and iteration in the Shorts feed: more uploads give the algorithm more chances. Raise the posting cadence when retention is decent and uploads are few; keep each video distinct, never a template copy.",
     "Change a video only when you are confident the change beats keeping it. A rescript or retopic costs a rebuild, so reserve it for clearly weak videos.",
   ]
     .filter(Boolean)
@@ -112,6 +135,10 @@ export function buildMastermindPrompt(input: {
           .map((r) => `- "${r.title}" (${r.format === "SHORT" ? "Short" : "long-form"}): ${r.viewsPerDay}/day, ${r.viewCount} views, ${r.likeCount ?? "?"} likes`)
           .join("\n")}`
       : "No published video has stats yet.",
+    input.retention?.length
+      ? `Viewer retention, last 28 days (average share watched, average seconds, subscribers gained):\n${input.retention.join("\n")}`
+      : "Retention data is not available (YouTube Analytics is not connected).",
+    input.cadence ? `Current posting cadence: ${input.cadence} video${input.cadence === 1 ? "" : "s"} a day.` : "",
     channel.performanceNotes?.trim() ? `Earlier lessons from the stats:\n${channel.performanceNotes.trim()}` : "",
     channel.mastermindNotes?.trim() ? `Your current strategy (revise it):\n${channel.mastermindNotes.trim()}` : "",
     candidates.length
@@ -173,7 +200,7 @@ export async function runMastermind(channel: Channel, now: Date = new Date(), cl
   const [published, upcoming, uploads90d] = await Promise.all([
     prisma.videoProject.findMany({
       where: { channelId: channel.id, status: ProjectStatus.PUBLISHED, publishedAt: { gte: ninetyDaysAgo } },
-      select: { title: true, topic: true, format: true, publishedAt: true, viewCount: true, likeCount: true, commentCount: true },
+      select: { title: true, topic: true, format: true, publishedAt: true, viewCount: true, likeCount: true, commentCount: true, youtubeVideoId: true },
     }),
     prisma.videoProject.findMany({
       where: { channelId: channel.id, status: { in: EDITABLE }, youtubeVideoId: null, OR: [{ scheduledFor: null }, { scheduledFor: { gte: now } }] },
@@ -202,7 +229,20 @@ export async function runMastermind(channel: Channel, now: Date = new Date(), cl
     hook: p.scenes[0]?.narrationText.slice(0, 160) ?? "",
     lockedScenes: p.scenes.filter((s) => s.locked).length,
   }));
+  let retention: string[] = [];
+  if (channel.oauthRefreshTokenEnc && hasAnalyticsScope(channel)) {
+    try {
+      const titles = new Map(published.filter((p) => p.youtubeVideoId).map((p) => [p.youtubeVideoId!, p.title ?? p.topic]));
+      const rows = await fetchVideoRetention(await getChannelAccessToken(channel), now);
+      retention = rows.map((r) => `- "${titles.get(r.videoId) ?? r.videoId}": ${r.views} views, ${r.avgViewedPct}% watched, ${r.avgViewSeconds}s average, +${r.subsGained} subscribers`);
+    } catch (error) {
+      console.error(`Retention for ${channel.name} failed`, error);
+    }
+  }
+  const cadence = channel.postingCron ? postsPerDay(channel.postingCron) : null;
   const { system, prompt } = buildMastermindPrompt({
+    retention,
+    cadence,
     channel: stats,
     progress: describeProgress(monetizationProgress(stats, uploads90d, now)),
     ranking: rankPerformance(published, now),
@@ -225,6 +265,10 @@ export async function runMastermind(channel: Channel, now: Date = new Date(), cl
   const brand = await autoBrand(channel, { banner: plan.requests.some((r) => r.kind === "banner"), avatar: plan.requests.some((r) => r.kind === "avatar") }, now);
   const requests = plan.requests.filter((r) => !brand.handled.has(r.kind));
   if (brand.avatarRequest) requests.unshift({ kind: "avatar", ...brand.avatarRequest });
+  if (channel.autopilot && plan.postsPerDay && plan.postsPerDay !== cadence && CADENCE_CRON[plan.postsPerDay]) {
+    await prisma.channel.update({ where: { id: channel.id }, data: { postingCron: CADENCE_CRON[plan.postsPerDay] } });
+    brand.done.push(`switched posting to ${plan.postsPerDay} a day`);
+  }
   const result = { ...(await applyPlan(channel, { ...plan, requests: requests.slice(0, 3) }, candidates, now)), branding: brand.done };
   await prisma.labReport.create({
     data: {
@@ -303,7 +347,7 @@ function planMarkdown(plan: MastermindPlan, result: MastermindResult): string {
     `## Diagnosis\n${plan.diagnosis}`,
     `## Strategy\n${plan.strategy}`,
     `## Changes made\n${result.applied.length ? result.applied.map((a) => `- ${a}`).join("\n") : "- None this run."}`,
-    result.branding?.length ? `## Branding\n${result.branding.map((b) => `- ${b}`).join("\n")}` : "",
+    result.branding?.length ? `## Channel changes\n${result.branding.map((b) => `- ${b}`).join("\n")}` : "",
     result.skipped.length ? `## Held back\n${result.skipped.map((s) => `- ${s}`).join("\n")}` : "",
     plan.backlog.length ? `## New topics\n${plan.backlog.map((t) => `- ${t}`).join("\n")}` : "",
     plan.requests.length ? `## Asked of you\n${plan.requests.map((r) => `- **${r.title}**: ${r.body}`).join("\n")}` : "",

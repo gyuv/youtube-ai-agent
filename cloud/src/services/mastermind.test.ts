@@ -129,3 +129,13 @@ describe("prompt and parsing", () => {
     expect(() => parsePlan(JSON.stringify({ strategy: "short" }))).toThrow(/schema/);
   });
 });
+
+describe("posting cadence", () => {
+  it("counts daily posts and maps cadences to crons", async () => {
+    const { postsPerDay, CADENCE_CRON } = await import("./mastermind");
+    expect(postsPerDay("0 17 * * *")).toBe(1);
+    expect(postsPerDay("0 9,14,19 * * *")).toBe(3);
+    expect(postsPerDay("0 18 * * 1,3,5")).toBeNull();
+    expect(postsPerDay(CADENCE_CRON[2])).toBe(2);
+  });
+});
