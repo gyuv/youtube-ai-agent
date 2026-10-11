@@ -213,7 +213,7 @@ export async function runMastermind(channel: Channel, now: Date = new Date(), cl
         status: true,
         format: true,
         scheduledFor: true,
-        scenes: { orderBy: { sceneIndex: "asc" }, select: { narrationText: true, locked: true } },
+        scenes: { orderBy: { sceneIndex: "asc" }, select: { narrationText: true, locked: true, aiClipEngine: true } },
       },
     }),
     prisma.videoProject.count({ where: { channelId: channel.id, status: ProjectStatus.PUBLISHED, publishedAt: { gte: ninetyDaysAgo } } }),
@@ -227,7 +227,8 @@ export async function runMastermind(channel: Channel, now: Date = new Date(), cl
     format: p.format,
     scheduledFor: p.scheduledFor,
     hook: p.scenes[0]?.narrationText.slice(0, 160) ?? "",
-    lockedScenes: p.scenes.filter((s) => s.locked).length,
+    // A Google Flow clip (made or on its way) costs scarce credits: rebuilding the script would throw it away.
+    lockedScenes: p.scenes.filter((s) => s.locked || s.aiClipEngine === "FLOW").length,
   }));
   let retention: string[] = [];
   if (channel.oauthRefreshTokenEnc && hasAnalyticsScope(channel)) {

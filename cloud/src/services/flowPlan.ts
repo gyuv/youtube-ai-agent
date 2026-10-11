@@ -156,6 +156,18 @@ export function parseFlowShots(text: string | undefined) {
   return parsed.data.shots;
 }
 
+type ShotScene = { videoClipUrl: string | null; aiClipEngine?: string | null; aiClipStatus?: string | null; locked: boolean };
+
+/** A finished Google Flow clip: not a stock or other AI clip, which Flow-only channels never show. */
+export function isFlowClip(scene: ShotScene): boolean {
+  return scene.aiClipEngine === FLOW_ENGINE && !scene.aiClipStatus && Boolean(scene.videoClipUrl);
+}
+
+/** A Flow-only scene that has never been sent to Flow (whatever stand-in visual it has meanwhile). */
+export function needsFlowShot(scene: ShotScene): boolean {
+  return !scene.locked && scene.aiClipEngine !== FLOW_ENGINE;
+}
+
 /** Plan and queue a Flow clip for every scene of a Flow-only video that doesn't have one yet. */
 export async function planFlowScenes(projectId: string, client?: GeminiClient): Promise<{ queued: number }> {
   const project = await prisma.videoProject.findUnique({
@@ -163,7 +175,7 @@ export async function planFlowScenes(projectId: string, client?: GeminiClient): 
     include: { channel: { select: { niche: true, mascotName: true, mascotLook: true } }, scenes: { orderBy: { sceneIndex: "asc" } } },
   });
   if (!project) throw new PipelineError("NOT_FOUND", `Project ${projectId} not found.`);
-  const todo = project.scenes.filter((s) => needsFlowPlan(s));
+  const todo = project.scenes.filter((s) => needsFlowShot(s));
   if (!todo.length) return { queued: 0 };
 
   const { system, prompt } = buildFlowScenesPrompt({

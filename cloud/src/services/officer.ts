@@ -1,5 +1,6 @@
 import { ProjectStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
+import { isFlowClip } from "./flowPlan";
 import { FLOW_ENGINE } from "./flowWorker";
 import { sceneHasAssets } from "./pipeline";
 
@@ -61,7 +62,21 @@ export async function runOfficer(maxFailures = MAX_FAILURES, now: Date = new Dat
     }
   }
 
-  // 2. Flow-only channels waiting on clips while no Flow worker is there: only a person can fix that.
+  // 2. A Flow-only video rendered with anything but Flow clips never goes out: send it back for its clips.
+  const notFlow = await prisma.videoProject.findMany({
+    where: { channel: { flowOnly: true }, status: ProjectStatus.RENDERED, youtubeVideoId: null },
+    select: { id: true, channelId: true, title: true, topic: true, scenes: { select: { videoClipUrl: true, aiClipEngine: true, aiClipStatus: true, locked: true } } },
+  });
+  for (const p of notFlow) {
+    if (p.scenes.every((s) => isFlowClip(s) || s.locked)) continue;
+    const name = `"${p.title ?? p.topic}"`;
+    await prisma.videoProject.update({ where: { id: p.id }, data: { status: ProjectStatus.ASSETS_READY, autopilotFailures: 0 } });
+    const missing = p.scenes.filter((s) => !isFlowClip(s) && !s.locked).length;
+    await incident(p.channelId, `Held back ${name}`, `This channel posts Google Flow video only, but ${missing} scene${missing === 1 ? " was" : "s were"} rendered from stand-in visuals.\n\nResolved: kept it off YouTube and sent it back for Flow clips; it renders again once every scene is a Flow clip.`, "done", now);
+    result.resolved.push(`held back ${name} until every scene is a Flow clip`);
+  }
+
+  // 3. Flow-only channels waiting on clips while no Flow worker is there: only a person can fix that.
   const worker = await prisma.workerHeartbeat.findUnique({ where: { engine: FLOW_ENGINE } });
   const workerIdle = !worker || now.getTime() - worker.seenAt.getTime() > FLOW_IDLE_MS;
   const flowChannels = await prisma.channel.findMany({ where: { flowOnly: true, isActive: true }, select: { id: true, name: true } });
