@@ -166,14 +166,15 @@ export async function queueAiClipAction(
   projectId: string,
   sceneId: string,
   prompt: string,
-  engine: "WAN2GP" | "MUAPI" = "WAN2GP",
+  engine: "WAN2GP" | "MUAPI" | "FLOW" = "WAN2GP",
   model?: string,
 ): Promise<ActionResult> {
   await requireOperator();
   const result = await toActionResult(async () => {
     const text = z.string().max(1500).parse(prompt);
-    if (z.enum(["WAN2GP", "MUAPI"]).parse(engine) === "MUAPI") await queueMuapiClip(Id.parse(sceneId), text, z.string().max(80).optional().parse(model));
-    else await queueSceneClip(Id.parse(sceneId), text);
+    const which = z.enum(["WAN2GP", "MUAPI", "FLOW"]).parse(engine);
+    if (which === "MUAPI") await queueMuapiClip(Id.parse(sceneId), text, z.string().max(80).optional().parse(model));
+    else await queueSceneClip(Id.parse(sceneId), text, which);
     return null;
   });
   refresh(projectId);

@@ -6,7 +6,7 @@ const db = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 
-import { clearAutopilotEvents, rescheduleOverdue, rescheduleProject, resumeStatus } from "./overdue";
+import { clearAutopilotEvents, moveProjectToSlot, rescheduleOverdue, rescheduleProject, resumeStatus } from "./overdue";
 
 const NOW = new Date("2026-09-29T12:00:00Z");
 const CHANNEL = { id: "c1", name: "Money Minute", postingCron: "0 18 * * *", postingTimezone: "UTC", isActive: true }; // daily 18:00 UTC
@@ -103,4 +103,26 @@ it("clears the whole activity log", async () => {
   db.autopilotEvent.deleteMany.mockResolvedValue({ count: 7 });
   await expect(clearAutopilotEvents()).resolves.toBe(7);
   expect(db.autopilotEvent.deleteMany).toHaveBeenCalledWith({});
+});
+
+describe("moveProjectToSlot", () => {
+  const at = new Date("2026-10-01T18:00:00Z");
+  beforeEach(() => {
+    (db.videoProject as Record<string, ReturnType<typeof vi.fn>>).findFirst = vi.fn().mockResolvedValue(null);
+  });
+
+  it("moves an unpublished video to a free future slot", async () => {
+    db.videoProject.findUnique.mockResolvedValue({ id: "p1", channelId: "c1", title: "Tax tips", topic: "t", status: "SCRIPTED", youtubeVideoId: null, channel: { postingTimezone: "UTC" } });
+    await moveProjectToSlot("p1", at, NOW);
+    expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "p1" }, data: { scheduledFor: at, publishStartedAt: null } });
+  });
+
+  it("refuses a past slot, a taken slot, and a video already on YouTube", async () => {
+    await expect(moveProjectToSlot("p1", new Date("2026-09-01T00:00:00Z"), NOW)).rejects.toThrow(/passed/);
+    db.videoProject.findUnique.mockResolvedValue({ id: "p1", channelId: "c1", title: null, topic: "t", status: "PUBLISHED", youtubeVideoId: "abc", channel: { postingTimezone: "UTC" } });
+    await expect(moveProjectToSlot("p1", at, NOW)).rejects.toThrow(/YouTube/);
+    db.videoProject.findUnique.mockResolvedValue({ id: "p1", channelId: "c1", title: null, topic: "t", status: "RENDERED", youtubeVideoId: null, channel: { postingTimezone: "UTC" } });
+    (db.videoProject as unknown as { findFirst: ReturnType<typeof vi.fn> }).findFirst.mockResolvedValue({ id: "other" });
+    await expect(moveProjectToSlot("p1", at, NOW)).rejects.toThrow(/already has a video/);
+  });
 });

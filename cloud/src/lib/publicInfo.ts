@@ -8,7 +8,7 @@ import { optionalEnv } from "./env";
 export const YOUTUBE_TERMS_URL = "https://www.youtube.com/t/terms";
 export const GOOGLE_PRIVACY_URL = "https://www.google.com/policies/privacy";
 export const GOOGLE_PERMISSIONS_URL = "https://security.google.com/settings/security/permissions";
-export const POLICIES_UPDATED = "29 September 2026";
+export const POLICIES_UPDATED = "9 October 2026";
 
 export function publicOperator(): { name: string; email: string | null } {
   return {

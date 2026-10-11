@@ -9,10 +9,18 @@ import type { YouTubeVideoMetadata } from "./renderContract";
 import { ScriptSchema, buildChapters } from "./scriptGenerator";
 import { fetchVideoVisibility, isLockedPrivate, type ReportedVisibility, type Visibility } from "./youtubeVisibility";
 
-/** youtube.upload publishes; youtube.readonly identifies the connected channel. */
+/**
+ * youtube.upload publishes; youtube.readonly identifies the connected channel; yt-analytics.readonly
+ * reads watch hours and Shorts views for the monetization tracker; youtube (manage) sets the
+ * channel banner. Channels connected before a scope was added keep working without it.
+ */
+export const ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly";
+export const MANAGE_SCOPE = "https://www.googleapis.com/auth/youtube";
 export const YOUTUBE_SCOPES = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
+  ANALYTICS_SCOPE,
+  MANAGE_SCOPE,
 ];
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";

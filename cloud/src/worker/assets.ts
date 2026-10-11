@@ -15,6 +15,7 @@ import type { RenderJob } from "@/services/renderContract";
 const EXTENSIONS: Record<string, string> = {
   "audio/mpeg": "mp3",
   "audio/mp3": "mp3",
+  "audio/wav": "wav",
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",

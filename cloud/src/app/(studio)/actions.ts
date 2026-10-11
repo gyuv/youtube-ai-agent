@@ -7,7 +7,9 @@ import { requireOperator } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { createVideoNow, createVideosAhead } from "@/services/autopilot";
 import { setFullAutomation } from "@/services/channels";
-import { clearAutopilotEvents, rescheduleProject } from "@/services/overdue";
+import { clearAutopilotEvents, moveProjectToSlot, rescheduleProject } from "@/services/overdue";
+import { dispatchCloudRender } from "@/services/pipeline";
+import { deleteProject } from "@/services/projects";
 import { dispatchAutopilotRun } from "@/services/renderDispatcher";
 
 /** Start the autopilot workflow now instead of waiting for its next scheduled run. */
@@ -105,6 +107,44 @@ export async function rescheduleProjectAction(projectId: string): Promise<Action
 export async function clearAutopilotActivityAction(): Promise<ActionResult<{ cleared: number }>> {
   await requireOperator();
   const result = await toActionResult(async () => ({ cleared: await clearAutopilotEvents() }));
+  revalidatePath("/");
+  return result;
+}
+
+/** Drag a video onto another posting slot on the dashboard's week view. */
+export async function moveToSlotAction(projectId: string, atIso: string): Promise<ActionResult<{ message: string }>> {
+  await requireOperator();
+  const result = await toActionResult(() => moveProjectToSlot(z.string().min(1).parse(projectId), new Date(z.iso.datetime({ offset: true }).parse(atIso))));
+  revalidatePath("/");
+  return result;
+}
+
+const BULK_ACTIONS = {
+  reschedule: (id: string) => rescheduleProject(id),
+  render: (id: string) => dispatchCloudRender(id),
+  delete: (id: string) => deleteProject(id),
+} as const;
+export type BulkKind = keyof typeof BULK_ACTIONS;
+
+/** Run one action over several selected videos; each succeeds or fails on its own. */
+export async function bulkProjectsAction(kind: BulkKind, projectIds: string[]): Promise<ActionResult<{ done: number; failed: string[] }>> {
+  await requireOperator();
+  const result = await toActionResult(async () => {
+    const run = BULK_ACTIONS[z.enum(["reschedule", "render", "delete"]).parse(kind)];
+    const ids = z.array(z.string().min(1)).min(1).max(50).parse(projectIds);
+    let done = 0;
+    const failed: string[] = [];
+    // One at a time: rescheduling picks slots in order, and renders share the dispatch token's rate limit.
+    for (const id of ids) {
+      try {
+        await run(id);
+        done++;
+      } catch (error) {
+        failed.push(errorMessage(error));
+      }
+    }
+    return { done, failed };
+  });
   revalidatePath("/");
   return result;
 }

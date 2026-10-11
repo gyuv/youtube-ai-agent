@@ -1,6 +1,7 @@
 /**
  * Narration voices, safe to import from client components (no Node or network code).
- * Plain names are free edge-tts voices; "elevenlabs:<voiceId>" uses ElevenLabs (needs ELEVENLABS_API_KEY).
+ * Plain names are free edge-tts voices; "elevenlabs:<voiceId>" uses ElevenLabs (needs ELEVENLABS_API_KEY);
+ * "gemini:<Name>" uses Gemini text-to-speech (the same voices Google Flow uses; needs GEMINI_API_KEY).
  */
 
 export const DEFAULT_VOICE = "en-US-AriaNeural";
@@ -33,8 +34,30 @@ export const ELEVENLABS_VOICES = [
   { id: "elevenlabs:AZnzlk1XvdvUeBnXmlld", label: "Domi (ElevenLabs, female)" },
 ] as const;
 
+export const GEMINI_PREFIX = "gemini:";
+
+/** Gemini's prebuilt TTS voices (the set Google Flow narrates with), with Google's own one-word character. */
+const GEMINI_VOICE_NAMES = [
+  ["Puck", "upbeat"], ["Zephyr", "bright"], ["Charon", "informative"], ["Kore", "firm"], ["Fenrir", "excitable"],
+  ["Leda", "youthful"], ["Orus", "firm"], ["Aoede", "breezy"], ["Callirrhoe", "easy-going"], ["Autonoe", "bright"],
+  ["Enceladus", "breathy"], ["Iapetus", "clear"], ["Umbriel", "easy-going"], ["Algieba", "smooth"], ["Despina", "smooth"],
+  ["Erinome", "clear"], ["Algenib", "gravelly"], ["Rasalgethi", "informative"], ["Laomedeia", "upbeat"], ["Achernar", "soft"],
+  ["Alnilam", "firm"], ["Schedar", "even"], ["Gacrux", "mature"], ["Pulcherrima", "forward"], ["Achird", "friendly"],
+  ["Zubenelgenubi", "casual"], ["Vindemiatrix", "gentle"], ["Sadachbia", "lively"], ["Sadaltager", "knowledgeable"], ["Sulafat", "warm"],
+] as const;
+const GEMINI_NAMES = new Set<string>(GEMINI_VOICE_NAMES.map(([name]) => name));
+
+export const GEMINI_VOICES = GEMINI_VOICE_NAMES.map(([name, character]) => ({ id: `${GEMINI_PREFIX}${name}`, label: `${name} (Gemini, ${character})` }));
+
+/** The Gemini voice name for a "gemini:<Name>" voice, or null. */
+export function geminiVoiceName(voice: string): string | null {
+  if (!voice.startsWith(GEMINI_PREFIX)) return null;
+  const name = voice.slice(GEMINI_PREFIX.length);
+  return GEMINI_NAMES.has(name) ? name : null;
+}
+
 /** Everything the studio's voice pickers suggest. */
-export const VOICE_OPTIONS = [...EDGE_VOICES, ...ELEVENLABS_VOICES];
+export const VOICE_OPTIONS = [...EDGE_VOICES, ...GEMINI_VOICES, ...ELEVENLABS_VOICES];
 
 // ElevenLabs voice IDs travel in the API URL path, so they must be strictly shaped too.
 const ELEVENLABS_ID_PATTERN = /^[A-Za-z0-9]{10,40}$/;
@@ -50,5 +73,5 @@ export function elevenLabsVoiceId(voice: string): string | null {
 const VOICE_PATTERN = /^[a-z]{2,3}(-[A-Za-z0-9]+)+Neural$/;
 
 export function isValidVoice(voice: string): boolean {
-  return VOICE_PATTERN.test(voice) || elevenLabsVoiceId(voice) !== null;
+  return VOICE_PATTERN.test(voice) || elevenLabsVoiceId(voice) !== null || geminiVoiceName(voice) !== null;
 }

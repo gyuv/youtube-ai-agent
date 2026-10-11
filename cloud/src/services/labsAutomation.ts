@@ -83,7 +83,6 @@ export async function findChannelForGrowthReview(now = new Date()) {
     where: {
       isActive: true,
       autoLabs: true,
-      autopilot: true,
       OR: [{ growthReviewAt: null }, { growthReviewAt: { lt: new Date(now.getTime() - GROWTH_REVIEW_INTERVAL_MS) } }],
     },
     orderBy: { growthReviewAt: { sort: "asc", nulls: "first" } },

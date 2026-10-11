@@ -38,7 +38,7 @@ export function SceneCard({
   const [query, setQuery] = useState(scene.stockQuery ?? "");
   const [source, setSource] = useState<Source>(initialSource(scene));
   const [clipPrompt, setClipPrompt] = useState(scene.aiClipPrompt ?? scene.visualPrompt ?? "");
-  const [engine, setEngine] = useState<"WAN2GP" | "MUAPI">(scene.aiClipEngine === "MUAPI" || (muapi && scene.visualSource === "MUAPI") ? "MUAPI" : "WAN2GP");
+  const [engine, setEngine] = useState<"WAN2GP" | "MUAPI" | "FLOW">(scene.aiClipEngine === "FLOW" ? "FLOW" : scene.aiClipEngine === "MUAPI" || (muapi && scene.visualSource === "MUAPI") ? "MUAPI" : "WAN2GP");
   const [muapiModel, setMuapiModel] = useState(muapi?.[0]?.endpoint ?? "");
   const [busy, setBusy] = useState<Busy>(null);
   const [, startTransition] = useTransition();
@@ -171,8 +171,9 @@ export function SceneCard({
               <div className="grid gap-2">
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   <span className="text-muted-foreground">Engine</span>
-                  <Select value={engine} onChange={(e) => setEngine(e.target.value as "WAN2GP" | "MUAPI")} disabled={!editable || locked} aria-label={`${label} AI video engine`} className="h-7 w-auto text-xs">
+                  <Select value={engine} onChange={(e) => setEngine(e.target.value as "WAN2GP" | "MUAPI" | "FLOW")} disabled={!editable || locked} aria-label={`${label} AI video engine`} className="h-7 w-auto text-xs">
                     <option value="WAN2GP">Wan2GP · free (Colab worker)</option>
+                    <option value="FLOW">Google Flow · free daily credits (your computer)</option>
                     <option value="MUAPI" disabled={!muapi}>
                       Muapi · paid (Kling, Seedance, Veo…){muapi ? "" : " — add MUAPI_API_KEY"}
                     </option>
@@ -202,7 +203,7 @@ export function SceneCard({
                         run(
                           "clip",
                           () => queueAiClipAction(projectId, scene.id, clipPrompt, engine, engine === "MUAPI" ? muapiModel : undefined),
-                          engine === "MUAPI" ? `${label}: sent to Muapi; the clip appears in a few minutes` : `${label}: AI video queued for the Wan2GP worker`,
+                          engine === "MUAPI" ? `${label}: sent to Muapi; the clip appears in a few minutes` : engine === "FLOW" ? `${label}: queued for your Google Flow worker (max 15 credits)` : `${label}: AI video queued for the Wan2GP worker`,
                         )
                       }
                     >

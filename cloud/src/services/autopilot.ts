@@ -5,6 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { analyzeChannel, findChannelToAnalyze } from "./analytics";
 import { findChannelForGrowthReview, packageProject, runGrowthReview } from "./labsAutomation";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets, sceneNeedsFill } from "./pipeline";
+import { needsFlowPlan, planFlowHook } from "./flowPlan";
+import { dropQueuedFlowClips, flowWorkerStatus } from "./flowWorker";
+import { growthBrief } from "./growthGoal";
+import { findChannelForMastermind, runMastermind } from "./mastermind";
 import { pollMuapiClips } from "./muapi";
 import { rescheduleOverdue } from "./overdue";
 import { findVideoToAutoPublish, publishRenderedProject } from "./publish";
@@ -25,6 +29,9 @@ import { SCHEDULE_GRACE_MS } from "./youtubeVisibility";
  *   4. verify       a published video whose slot has passed really went live (not locked private)
  *   5. plan         a new video for the earliest open slot inside a channel's lead window
  *
+ * Between the daily/weekly reviews and the autopilot work, the Growth Lab mastermind (mastermind.ts)
+ * re-plans one channel at a time every few hours, on every channel that has it on.
+ *
  * Work is taken in deadline order (earliest slot first) and finished before new work starts.
  * The autopilot only ever touches projects it created, and gives up on one after
  * MAX_AUTOPILOT_FAILURES so a broken project can't burn free quotas forever. An outside service
@@ -41,7 +48,7 @@ export const PLANNING_PAUSE_MS = 12 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const VERIFY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type TickAction = "packaged" | "reviewed" | "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "waiting" | "error" | "idle";
+export type TickAction = "mastermind" | "packaged" | "reviewed" | "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "waiting" | "error" | "idle";
 
 export interface TickResult {
   action: TickAction;
@@ -72,6 +79,10 @@ type AutopilotChannel = Pick<
   | "learnFromAnalytics"
   | "performanceNotes"
   | "autoLabs"
+  | "growthGoal"
+  | "mastermind"
+  | "mastermindNotes"
+  | "flowHookClips"
 >;
 
 type WorkProject = Pick<VideoProject, "id" | "channelId" | "status" | "topic" | "title" | "autopilotFailures" | "scheduledFor"> & {
@@ -88,15 +99,29 @@ function autopilotVisualSource(source: VisualSource): "POLLINATIONS" | "PEXELS" 
   return source === VisualSource.PEXELS || source === VisualSource.PINTEREST ? source : "POLLINATIONS";
 }
 
-/** A Pinterest search is still in flight (and recent), so the scene's visual is about to change. */
-function awaitingPinterest(p: WorkProject, now: Date): boolean {
-  const since = now.getTime() - PINTEREST_WAIT_MS;
-  return p.scenes.some(
-    (s) =>
-      s.aiClipEngine === "PINTEREST" &&
-      (s.aiClipStatus === "QUEUED" || s.aiClipStatus === "RUNNING") &&
-      (s.aiClipUpdatedAt?.getTime() ?? 0) > since,
-  );
+/**
+ * How long a render waits for the Google Flow worker (on the operator's computer, which may be
+ * asleep) before going out with the hook's still image instead.
+ */
+export const FLOW_WAIT_MS = 4 * 60 * 60 * 1000;
+
+/** A Flow clip being generated is waited for this long at most (the worker's claim expires then). */
+const FLOW_RUNNING_WAIT_MS = 45 * 60 * 1000;
+
+/**
+ * A Pinterest search or Flow clip is still in flight (and recent), so a scene's visual is about to
+ * change. A queued Flow clip is only worth waiting for while a worker is there to make it.
+ */
+function awaitingPinterest(p: WorkProject, now: Date, flowReady: boolean): boolean {
+  return p.scenes.some((s) => {
+    const since = now.getTime() - (s.aiClipUpdatedAt?.getTime() ?? 0);
+    if (s.aiClipEngine === "PINTEREST") return (s.aiClipStatus === "QUEUED" || s.aiClipStatus === "RUNNING") && since < PINTEREST_WAIT_MS;
+    if (s.aiClipEngine === "FLOW") {
+      if (s.aiClipStatus === "RUNNING") return since < FLOW_RUNNING_WAIT_MS;
+      if (s.aiClipStatus === "QUEUED") return flowReady && since < FLOW_WAIT_MS;
+    }
+    return false;
+  });
 }
 
 async function log(level: "info" | "error", action: string, message: string, ids: { channelId?: string; projectId?: string } = {}) {
@@ -164,12 +189,16 @@ async function recordFailure(project: WorkProject, step: string, error: unknown)
 
 const label = (p: WorkProject) => `"${p.title ?? p.topic}"`;
 
-function findWork(projects: WorkProject[], channels: Map<string, AutopilotChannel>, now: Date) {
+function findWork(projects: WorkProject[], channels: Map<string, AutopilotChannel>, now: Date, flowReady = false) {
   const complete = (p: WorkProject) => p.scenes.length > 0 && p.scenes.every(sceneHasAssets);
   projects = projects.filter((p) => !p.autopilotRetryAt || p.autopilotRetryAt.getTime() <= now.getTime());
   for (const p of projects) {
     const channel = channels.get(p.channelId)!;
-    if (awaitingPinterest(p, now)) continue;
+    if (awaitingPinterest(p, now, flowReady)) continue;
+    // Google Flow on and a worker there to make it: Script Lab plans the hook clip once, before the video renders.
+    if (flowReady && p.status === ProjectStatus.ASSETS_READY && channel.flowHookClips && needsFlowPlan(p.scenes[0] as Parameters<typeof needsFlowPlan>[0])) {
+      return { kind: "flowplan" as const, project: p, channel };
+    }
     // Creator Labs package the video (title, SEO, chapters) once, before it renders.
     if (p.status === ProjectStatus.ASSETS_READY && channel.autoLabs && !p.labsAppliedAt) return { kind: "package" as const, project: p, channel };
     if (p.status === ProjectStatus.ASSETS_READY && !channel.autopilotReview) return { kind: "dispatch" as const, project: p, channel };
@@ -264,6 +293,7 @@ async function nextTopic(channel: AutopilotChannel): Promise<{ topic: string; so
     format: channel.defaultFormat,
     channelPrompt: channel.defaultScriptPrompt,
     performanceNotes: channel.learnFromAnalytics ? channel.performanceNotes : null,
+    growth: growthBrief("topic", channel.growthGoal, channel.mastermind ? channel.mastermindNotes : null),
     recentTopics: recent.flatMap((p) => [p.title, p.topic].filter((t): t is string => Boolean(t))),
   });
   return { topic, source: "Gemini" };
@@ -321,6 +351,22 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
     return { action: "reviewed", message, more: true, swept, ...ids };
   }
 
+  // Every few hours per channel, autopilot or not: the Growth Lab mastermind re-plans the channel.
+  const toMaster = await findChannelForMastermind(now);
+  if (toMaster) {
+    const ids = { channelId: toMaster.id };
+    try {
+      const r = await runMastermind(toMaster, now);
+      const message = `${toMaster.name}: Growth Lab mastermind ${r.applied.length ? `changed ${r.applied.length} video${r.applied.length === 1 ? "" : "s"} (${r.applied.join("; ").slice(0, 400)})` : "kept every upcoming video"}${r.backlogAdded ? `, queued ${r.backlogAdded} topic${r.backlogAdded === 1 ? "" : "s"}` : ""}${r.requests ? `, and needs you for ${r.requests} thing${r.requests === 1 ? "" : "s"}` : ""}. ${r.diagnosis}`.slice(0, 1500);
+      await log("info", "mastermind", message, ids);
+      return { action: "mastermind", message, more: true, swept, ...ids };
+    } catch (error) {
+      const message = `${toMaster.name}: Growth Lab mastermind failed: ${errorMessage(error)}`;
+      await log("error", "mastermind", message, ids);
+      return { action: "error", message, more: true, swept, ...ids };
+    }
+  }
+
   const channels = await prisma.channel.findMany({ where: { autopilot: true, isActive: true } });
   if (channels.length === 0) return { action: "idle", message: "Autopilot is off on every channel.", more: false, swept };
   const byId = new Map(channels.map((c) => [c.id, c]));
@@ -361,7 +407,9 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
     },
   });
 
-  const work = findWork(projects, byId, now);
+  // Only ask about the Flow worker when a channel uses Flow; without a ready worker, Flow is skipped entirely.
+  const flowReady = channels.some((c) => c.flowHookClips) ? (await flowWorkerStatus(now)).ready : false;
+  const work = findWork(projects, byId, now, flowReady);
   if (work) {
     const { project, channel } = work;
     const ids = { projectId: project.id, channelId: channel.id };
@@ -372,8 +420,18 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
         await log(failed.length && !applied.length ? "error" : "info", "packaged", message, ids);
         return { action: "packaged", message, more: true, swept, ...ids };
       }
+      if (work.kind === "flowplan") {
+        const plan = await planFlowHook(project.id);
+        const message = plan.animate
+          ? `${label(project)}: Script Lab planned a Google Flow clip for the hook and queued it for your Flow worker (${plan.reason}).`
+          : `${label(project)}: Script Lab kept the hook's still image, saving Flow credits (${plan.reason}).`;
+        await log("info", "flowplan", message, ids);
+        return { action: "planned", message, more: true, swept, ...ids };
+      }
       if (work.kind === "dispatch") {
         const retry = project.status === ProjectStatus.FAILED;
+        // Rendering with the still now: a Flow clip still in the queue would only spend credits on a finished video.
+        await dropQueuedFlowClips(project.id, "Rendered with the still image before a Flow worker picked this clip up.");
         await dispatchCloudRender(project.id);
         // Each re-render of a failed video uses one attempt, so a render that always fails stops.
         if (retry) await prisma.videoProject.update({ where: { id: project.id }, data: { autopilotFailures: { increment: 1 } } });
@@ -396,7 +454,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       await log("info", "scripted", message, ids);
       return { action: "scripted", message, more: true, swept, ...ids };
     } catch (error) {
-      const step = work.kind === "dispatch" ? "Render dispatch" : work.kind === "fill" ? "Asset generation" : work.kind === "package" ? "Creator Labs" : "Script writing";
+      const step = work.kind === "flowplan" ? "Flow clip plan" : work.kind === "dispatch" ? "Render dispatch" : work.kind === "fill" ? "Asset generation" : work.kind === "package" ? "Creator Labs" : "Script writing";
       if (isProviderError(error)) {
         const message = await postpone(project, step, error, now);
         return { action: "waiting", message, more: true, swept, ...ids };

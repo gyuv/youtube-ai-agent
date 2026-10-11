@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { growthBrief } from "./growthGoal";
 import { Prisma, type Scene } from "@/generated/prisma/client";
 import { AiClipStatus, ProjectStatus, VisualSource } from "@/generated/prisma/enums";
 import { optionalEnv } from "@/lib/env";
@@ -106,6 +107,7 @@ export async function generateProjectScript(projectId: string) {
     targetAudience: project.channel.targetAudience,
     channelPrompt: project.channel.defaultScriptPrompt,
     performanceNotes: project.channel.learnFromAnalytics ? project.channel.performanceNotes : null,
+    growth: growthBrief("script", project.channel.growthGoal, project.channel.mastermind ? project.channel.mastermindNotes : null),
   });
 
   return prisma.$transaction(async (tx) => {
@@ -172,7 +174,7 @@ export async function regenerateSceneAudio(sceneId: string, options: { narration
   const voice = project.voice ?? project.channel.defaultVoice ?? DEFAULT_VOICE;
 
   const speech = await synthesizeSpeech(text, { voice });
-  const path = `projects/${project.id}/scenes/${scene.id}/voice-${shortHash(text, speech.voice)}.mp3`;
+  const path = `projects/${project.id}/scenes/${scene.id}/voice-${shortHash(text, speech.voice)}.${speech.contentType === "audio/wav" ? "wav" : "mp3"}`;
   const voiceAudioUrl = await uploadObject(path, speech.audio, speech.contentType);
 
   const updated = await prisma.scene.update({

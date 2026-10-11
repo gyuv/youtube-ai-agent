@@ -136,3 +136,24 @@ export async function clearAutopilotEvents(): Promise<number> {
   const { count } = await prisma.autopilotEvent.deleteMany({});
   return count;
 }
+
+/** Dragging a video onto another slot on the dashboard's week view. */
+export async function moveProjectToSlot(projectId: string, at: Date, now: Date = new Date()) {
+  if (at.getTime() <= now.getTime()) throw new PipelineError("CONFLICT", "That slot has already passed.");
+  const project = await prisma.videoProject.findUnique({
+    where: { id: projectId },
+    select: { id: true, channelId: true, title: true, topic: true, status: true, youtubeVideoId: true, channel: { select: { postingTimezone: true } } },
+  });
+  if (!project) throw new PipelineError("NOT_FOUND", `Video ${projectId} not found.`);
+  // Once uploaded, YouTube holds its own publish time; moving it here would only make the studio wrong.
+  if (project.youtubeVideoId || project.status === ProjectStatus.PUBLISHED) throw new PipelineError("CONFLICT", "This video is already on YouTube; change its time in YouTube Studio.");
+  const clash = await prisma.videoProject.findFirst({
+    where: { channelId: project.channelId, id: { not: projectId }, scheduledFor: { gte: new Date(at.getTime() - 60_000), lte: new Date(at.getTime() + 60_000) } },
+    select: { id: true },
+  });
+  if (clash) throw new PipelineError("CONFLICT", "That slot already has a video.");
+  await prisma.videoProject.update({ where: { id: projectId }, data: { scheduledFor: at, publishStartedAt: null } });
+  const message = `"${project.title ?? project.topic}" moved to ${formatSlot(at, project.channel.postingTimezone)}.`;
+  await prisma.autopilotEvent.create({ data: { level: "info", action: "rescheduled", message, channelId: project.channelId, projectId } });
+  return { message };
+}

@@ -22,6 +22,9 @@ import { refreshAssetStatus } from "./pipeline";
  *
  * The Pinterest worker (cloud/pinterest/) uses the same queue with aiClipEngine "PINTEREST": its job's
  * prompt is the search query, and it uploads the first video Pin it can download.
+ *
+ * The Google Flow worker (cloud/flow/) uses it with aiClipEngine "FLOW": it drives flow-mcp on the
+ * operator's own computer, animating the scene's current image with Flow's free daily credits.
  */
 
 export const CLAIM_TTL_MS = 45 * 60 * 1000;
@@ -34,15 +37,15 @@ export function clipResolution(format: "SHORT" | "LONG_FORM"): { width: number; 
 }
 
 /** Engines whose clips are made by a worker that polls this app. */
-export type WorkerEngine = "WAN2GP" | "PINTEREST";
+export type WorkerEngine = "WAN2GP" | "PINTEREST" | "FLOW";
 
 /** Rows queued before aiClipEngine existed have it null and belong to Wan2GP. */
 function engineOf(aiClipEngine: string | null): WorkerEngine | "MUAPI" {
-  return aiClipEngine === "PINTEREST" || aiClipEngine === "MUAPI" ? aiClipEngine : "WAN2GP";
+  return aiClipEngine === "PINTEREST" || aiClipEngine === "MUAPI" || aiClipEngine === "FLOW" ? aiClipEngine : "WAN2GP";
 }
 
 function engineFilter(engine: WorkerEngine) {
-  return engine === "PINTEREST" ? { aiClipEngine: "PINTEREST" } : { OR: [{ aiClipEngine: null }, { aiClipEngine: "WAN2GP" }] };
+  return engine === "WAN2GP" ? { OR: [{ aiClipEngine: null }, { aiClipEngine: "WAN2GP" }] } : { aiClipEngine: engine };
 }
 
 function clipPath(projectId: string, sceneId: string, claimedAt: Date, engine: WorkerEngine = "WAN2GP"): string {
@@ -66,8 +69,8 @@ async function loadEditableScene(sceneId: string) {
   return scene;
 }
 
-/** Ask the GPU worker for a clip. An empty prompt uses the scene's image prompt. */
-export async function queueSceneClip(sceneId: string, prompt?: string) {
+/** Ask a worker for a clip (the Wan2GP GPU worker by default). An empty prompt uses the scene's image prompt. */
+export async function queueSceneClip(sceneId: string, prompt?: string, engine: "WAN2GP" | "FLOW" = "WAN2GP") {
   const scene = await loadEditableScene(sceneId);
   const text = prompt?.trim() || clipPromptFor(scene, scene.project.channel.defaultVisualPrompt);
   return prisma.scene.update({
@@ -77,7 +80,7 @@ export async function queueSceneClip(sceneId: string, prompt?: string) {
       aiClipPrompt: text.slice(0, MAX_PROMPT_CHARS),
       aiClipError: null,
       aiClipUpdatedAt: new Date(),
-      aiClipEngine: "WAN2GP",
+      aiClipEngine: engine,
       aiClipRequestId: null,
     },
   });
@@ -101,6 +104,8 @@ export interface ClipJob {
   durationSeconds: number;
   /** The scene's current still, for image-to-video models. */
   imageUrl: string | null;
+  /** Flow only: the channel's recurring host, attached as a Flow character (instead of the still). */
+  character?: { name: string; look: string } | null;
   upload: SignedUpload;
 }
 
@@ -131,7 +136,7 @@ export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WA
     const scene = await prisma.scene.findFirst({
       where,
       orderBy: { aiClipUpdatedAt: "asc" },
-      include: { project: { select: { id: true, format: true } } },
+      include: { project: { select: { id: true, format: true, channel: { select: { mascotName: true, mascotLook: true } } } } },
     });
     if (!scene) return null;
 
@@ -148,6 +153,9 @@ export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WA
       ...clipResolution(scene.project.format),
       durationSeconds: scene.durationSeconds,
       imageUrl: scene.imageUrl,
+      ...(engine === "FLOW"
+        ? { character: scene.project.channel.mascotName && scene.project.channel.mascotLook ? { name: scene.project.channel.mascotName, look: scene.project.channel.mascotLook } : null }
+        : {}),
       upload: await createSignedUpload(clipPath(scene.project.id, scene.id, now, engine), "video/mp4"),
     };
   }
@@ -182,7 +190,8 @@ export async function completeClip(report: ClipReport, engine: WorkerEngine = "W
           aiClipError: null,
           aiClipUpdatedAt: new Date(),
           videoClipUrl: publicObjectUrl(clipPath(scene.project.id, scene.id, claimedAt, engine)),
-          visualSource: engine === "PINTEREST" ? VisualSource.PINTEREST : VisualSource.WAN2GP,
+          // Flow clips keep the scene's source: the clip animates that very image.
+          ...(engine === "FLOW" ? {} : { visualSource: engine === "PINTEREST" ? VisualSource.PINTEREST : VisualSource.WAN2GP }),
         }
       : { aiClipStatus: AiClipStatus.FAILED, aiClipError: report.error.slice(0, 2000), aiClipUpdatedAt: new Date() },
   });
