@@ -8,6 +8,7 @@ const db = vi.hoisted(() => ({
   scene: { count: vi.fn() },
 }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
+vi.mock("./youtube", () => ({ MANAGE_SCOPE: "manage", getChannelAccessToken: vi.fn(async () => "tok") }));
 
 import { FLOW_IDLE_MS, MAX_REVIVES, runOfficer } from "./officer";
 
@@ -63,4 +64,19 @@ it("keeps a Flow-only video rendered from stock clips off YouTube and sends it b
   expect(db.videoProject.update).toHaveBeenCalledTimes(1);
   expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "p2" }, data: { status: "ASSETS_READY", autopilotFailures: 0 } });
   expect(r.resolved).toEqual(['held back "Crow" until every scene is a Flow clip']);
+});
+
+it("takes down a scheduled non-Flow upload before it goes live and sends the video back for Flow clips", async () => {
+  const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const stock = { videoClipUrl: "https://pexels/c.mp4", aiClipEngine: null, aiClipStatus: null, locked: false };
+  db.videoProject.findMany
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ id: "p4", channelId: "c1", title: "Crow", topic: "crow", youtubeVideoId: "vid1", channel: { id: "c1", name: "K", oauthRefreshTokenEnc: "e", oauthScopes: ["manage"] }, scenes: [stock] }]);
+  const r = await runOfficer(3, NOW);
+  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("videos?id=vid1"), expect.objectContaining({ method: "DELETE" }));
+  expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "p4" }, data: expect.objectContaining({ status: "ASSETS_READY", youtubeVideoId: null }) });
+  expect(r.resolved[0]).toContain("took down");
+  vi.unstubAllGlobals();
 });

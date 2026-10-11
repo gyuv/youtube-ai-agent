@@ -2,6 +2,7 @@ import { ProjectStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { isFlowClip } from "./flowPlan";
 import { FLOW_ENGINE } from "./flowWorker";
+import { MANAGE_SCOPE, getChannelAccessToken } from "./youtube";
 import { sceneHasAssets } from "./pipeline";
 
 /**
@@ -76,7 +77,50 @@ export async function runOfficer(maxFailures = MAX_FAILURES, now: Date = new Dat
     result.resolved.push(`held back ${name} until every scene is a Flow clip`);
   }
 
-  // 3. Flow-only channels waiting on clips while no Flow worker is there: only a person can fix that.
+  // 3. A non-Flow upload already scheduled on YouTube for a Flow-only channel: take it down before it
+  //    goes live and rebuild the video from Flow clips.
+  const scheduled = await prisma.videoProject.findMany({
+    where: { channel: { flowOnly: true }, status: ProjectStatus.PUBLISHED, youtubeVideoId: { not: null }, scheduledFor: { gt: new Date(now.getTime() + 10 * 60_000) } },
+    select: {
+      id: true,
+      channelId: true,
+      title: true,
+      topic: true,
+      youtubeVideoId: true,
+      channel: { select: { id: true, name: true, oauthRefreshTokenEnc: true, oauthScopes: true } },
+      scenes: { select: { videoClipUrl: true, aiClipEngine: true, aiClipStatus: true, locked: true } },
+    },
+  });
+  for (const p of scheduled) {
+    if (p.scenes.every((s) => isFlowClip(s) || s.locked)) continue;
+    const name = `"${p.title ?? p.topic}"`;
+    const link = `https://youtu.be/${p.youtubeVideoId}`;
+    if (!p.channel.oauthRefreshTokenEnc || !p.channel.oauthScopes.includes(MANAGE_SCOPE)) {
+      const open = await prisma.mastermindRequest.findFirst({ where: { channelId: p.channelId, kind: "delete_video", status: "open", body: { contains: link } } });
+      if (!open) {
+        await prisma.mastermindRequest.create({
+          data: { channelId: p.channelId, kind: "delete_video", title: `Delete the scheduled ${name}`, body: `${link} is scheduled but isn't Google Flow video. Delete it in YouTube Studio before it goes live, or reconnect YouTube on the channel page so the officer can do it.` },
+        });
+        result.open.push(`delete ${name} on YouTube`);
+      }
+      continue;
+    }
+    try {
+      const token = await getChannelAccessToken(p.channel);
+      const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?id=${encodeURIComponent(p.youtubeVideoId!)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) });
+    if (!res.ok && res.status !== 404) throw new Error(`YouTube refused to delete ${link} (${res.status})`);
+    await prisma.videoProject.update({
+      where: { id: p.id },
+      data: { status: ProjectStatus.ASSETS_READY, youtubeVideoId: null, publishedAt: null, renderedVideoUrl: null, publishStartedAt: null, youtubeLocked: false, youtubeCheckedAt: null, autopilotFailures: 0 },
+    });
+    await incident(p.channelId, `Took down ${name}`, `${link} had been scheduled with stand-in visuals, but this channel posts Google Flow video only.\n\nResolved: deleted it from YouTube before it went live and sent the video back for Flow clips; it is uploaded again once every scene is a Flow clip.`, "done", now);
+    result.resolved.push(`took down the non-Flow upload of ${name} and is rebuilding it with Flow`);
+    } catch (error) {
+      result.open.push(`couldn't take down ${name} (${error instanceof Error ? error.message : String(error)}); retrying next hour`);
+    }
+  }
+
+  // 4. Flow-only channels waiting on clips while no Flow worker is there: only a person can fix that.
   const worker = await prisma.workerHeartbeat.findUnique({ where: { engine: FLOW_ENGINE } });
   const workerIdle = !worker || now.getTime() - worker.seenAt.getTime() > FLOW_IDLE_MS;
   const flowChannels = await prisma.channel.findMany({ where: { flowOnly: true, isActive: true }, select: { id: true, name: true } });
