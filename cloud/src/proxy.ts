@@ -3,7 +3,7 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 
 /**
  * Every page and API route requires an operator session, except login and the endpoints
- * workers call with their own bearer secret (render webhook, autopilot tick, Wan2GP worker).
+ * workers call with their own bearer secret (render webhook, autopilot tick, Wan2GP, Pinterest and Flow workers).
  */
 export async function proxy(request: NextRequest) {
   if (await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value)) return NextResponse.next();
@@ -19,5 +19,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!login|privacy|terms|api/render/webhook|api/autopilot/tick|api/wan2gp|api/pinterest|_next/static|_next/image|favicon.ico|fonts/).*)"],
+  matcher: ["/((?!login|privacy|terms|api/render/webhook|api/autopilot/tick|api/wan2gp|api/pinterest|api/flow|_next/static|_next/image|favicon.ico|fonts/).*)"],
 };
