@@ -14,6 +14,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { prisma } from "@/lib/prisma";
 import { canSetBanner, recentBrandAssets } from "@/services/branding";
+import { flowWorkerStatus } from "@/services/flowWorker";
 import { openRequests } from "@/services/mastermind";
 import { hasAnalyticsScope, monetizationProgress } from "@/services/monetization";
 import { GOOGLE_PERMISSIONS_URL } from "@/lib/publicInfo";
@@ -37,11 +38,12 @@ export default async function ChannelPage({
   const now = new Date();
   const channel = await prisma.channel.findUnique({ where: { id } });
   if (!channel) notFound();
-  const [uploads90d, assets, requests, report] = await Promise.all([
+  const [uploads90d, assets, requests, report, flowWorker] = await Promise.all([
     prisma.videoProject.count({ where: { channelId: id, status: "PUBLISHED", publishedAt: { gte: new Date(now.getTime() - 90 * 86_400_000) } } }),
     recentBrandAssets(id),
     openRequests(id),
     prisma.labReport.findFirst({ where: { channelId: id, toolId: "mastermind" }, orderBy: { createdAt: "desc" } }),
+    flowWorkerStatus(now),
   ]);
   const tiers = monetizationProgress(channel, uploads90d, now);
 
@@ -194,7 +196,11 @@ export default async function ChannelPage({
           </div>
         </CardHeader>
         <CardContent>
-          <FlowSettings channelId={channel.id} initial={{ flowHookClips: channel.flowHookClips, mascotName: channel.mascotName, mascotLook: channel.mascotLook }} />
+          <FlowSettings
+            channelId={channel.id}
+            initial={{ flowHookClips: channel.flowHookClips, mascotName: channel.mascotName, mascotLook: channel.mascotLook }}
+            worker={{ online: flowWorker.online, ready: flowWorker.ready, creditsLeft: flowWorker.creditsLeft, seenAgo: flowWorker.seenAt ? timeAgo(flowWorker.seenAt, now) : null }}
+          />
         </CardContent>
       </Card>
 

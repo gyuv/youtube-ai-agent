@@ -9,7 +9,22 @@ import { FieldHint, Input, Label, Textarea } from "@/components/ui/form-controls
 import { cn } from "@/lib/utils";
 
 /** Per channel: animate hooks with Google Flow, and the recurring host Flow keeps on-model. */
-export function FlowSettings({ channelId, initial }: { channelId: string; initial: { flowHookClips: boolean; mascotName: string | null; mascotLook: string | null } }) {
+export interface FlowWorkerView {
+  online: boolean;
+  ready: boolean;
+  creditsLeft: number | null;
+  seenAgo: string | null;
+}
+
+export function FlowSettings({
+  channelId,
+  initial,
+  worker,
+}: {
+  channelId: string;
+  initial: { flowHookClips: boolean; mascotName: string | null; mascotLook: string | null };
+  worker: FlowWorkerView;
+}) {
   const [on, setOn] = useState(initial.flowHookClips);
   const [name, setName] = useState(initial.mascotName ?? "");
   const [look, setLook] = useState(initial.mascotLook ?? "");
@@ -36,6 +51,32 @@ export function FlowSettings({ channelId, initial }: { channelId: string; initia
 
   return (
     <div className="grid gap-5">
+      <div
+        className={cn(
+          "flex items-start gap-2.5 rounded-2xl border px-3 py-2.5 text-xs",
+          worker.ready ? "border-emerald-500/30 bg-emerald-500/[0.06]" : worker.online ? "border-amber-500/30 bg-amber-500/[0.06]" : "bg-white/[0.02]",
+        )}
+      >
+        <span className={cn("mt-1 size-2 shrink-0 rounded-full", worker.ready ? "animate-pulse bg-emerald-400" : worker.online ? "bg-amber-400" : "bg-white/25")} aria-hidden />
+        <span className="text-muted-foreground">
+          {worker.ready ? (
+            <>
+              <span className="font-medium text-emerald-300">Flow worker online</span>
+              {worker.creditsLeft !== null ? ` · ${worker.creditsLeft} credits left today` : ""}. Hooks are being planned and animated.
+            </>
+          ) : worker.online ? (
+            <>
+              <span className="font-medium text-amber-200">Flow worker online, today&apos;s credits used.</span> Videos render with their stills until tomorrow.
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-foreground">No Flow worker{worker.seenAgo ? ` since ${worker.seenAgo}` : " yet"}.</span> Nothing waits for it: videos
+              render and post on time with their still images, and Flow is used automatically whenever a worker checks in.
+            </>
+          )}
+        </span>
+      </div>
+
       <button
         type="button"
         onClick={() => setOn(!on)}
@@ -49,7 +90,7 @@ export function FlowSettings({ channelId, initial }: { channelId: string; initia
           <span className="block text-sm font-medium">Animate each video&apos;s hook with Google Flow</span>
           <span className="block text-xs text-muted-foreground">
             Script Lab plans the shot first and only spends credits when motion beats the still. Max 15 credits a clip and 25 a day,
-            enforced by the Flow worker on your computer. If it&apos;s off, the video waits up to 4 hours, then posts with the still.
+            enforced by the Flow worker on your computer. Without a worker online, Flow is skipped and nothing waits.
           </span>
         </span>
         <span className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", on ? "bg-primary" : "bg-white/15")} aria-hidden>

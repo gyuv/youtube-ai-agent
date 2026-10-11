@@ -3,8 +3,10 @@
 Animates each video's **hook** (scene 1) with [Google Flow](https://flow.google.com) through
 [flow-mcp](https://github.com/GTAI-1/flow-mcp), using Flow's free daily credits, starring your channel's host.
 
-flow-mcp drives a real Chrome window signed into your Google account, so this runs on **your own
-computer**, not in the cloud. The studio never calls it; the worker polls the studio, so it needs no
+flow-mcp drives a real Chrome window signed into your Google account, so this runs on **a computer
+with a screen**, not in the cloud: Google's sign-in and Flow's invisible reCAPTCHA block cloud servers,
+and moving your Google session onto one would put the account at risk. Without a worker the studio
+simply doesn't use Flow; everything else, including Gemini voices, runs in the cloud as usual. The studio never calls it; the worker polls the studio, so it needs no
 public address.
 
 ```
@@ -20,8 +22,10 @@ Studio (Vercel) ──plans + queues──▶ /api/flow/claim ◀──polls─�
   before generating, and an over-cap clip is skipped with nothing spent.
 - **25 credits a day.** The worker keeps a ledger (`~/.flow-mcp/lumen-ledger.json`) and only starts a
   clip when at least 15 are left today. That is one clip a day, two when Flow quotes 12 or less.
-- **No waiting forever.** If your computer is off, the studio waits up to 4 hours, then posts the
-  video with the still image.
+- **Only when a worker is there.** Every poll is a check-in with the credits left today. With no
+  worker seen for 15 minutes, or none with 15 credits left, the autopilot skips Flow entirely (no
+  plan, no wait) and videos post on time with their stills. A clip still queued when its video
+  renders is withdrawn, so a worker that comes back later never spends credits on a finished video.
 
 ## Setup
 

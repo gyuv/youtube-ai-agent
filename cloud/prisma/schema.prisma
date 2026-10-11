@@ -355,3 +355,11 @@ model BrandAsset {
 
   @@index([channelId, kind, createdAt])
 }
+
+/// Last check-in from a worker that runs outside the cloud (e.g. the Google Flow worker on a PC), so the
+/// autopilot only plans work for it while it is actually there.
+model WorkerHeartbeat {
+  engine      String   @id // e.g. FLOW
+  seenAt      DateTime
+  creditsLeft Int? // what the worker can still spend today
+}

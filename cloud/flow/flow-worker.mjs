@@ -8,6 +8,10 @@
 // Budget (never exceeded): each clip is capped at FLOW_MAX_CREDITS (default 15) using Flow's own price
 // quote, so an over-cap clip is skipped before anything is spent; and a clip only starts when at least
 // that many of FLOW_DAILY_CREDITS (default 25) are left today. Spend is kept in ~/.flow-mcp/lumen-ledger.json.
+//
+// Every poll is a check-in. While the worker is checking in with credits left, the studio's autopilot
+// plans Flow clips; when it goes quiet (computer off, Flow signed out) or runs out for the day, the
+// autopilot skips Flow and renders videos on time with their still images.
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -152,15 +156,18 @@ async function tick() {
   const book = ledger();
   const left = DAILY_CREDITS - book.spent;
   if (left < MAX_CREDITS) {
+    // Still check in, so the studio knows not to plan clips today and renders with stills on time.
+    await lumen("/api/flow/claim", { creditsLeft: Math.max(0, left) });
     log(`Daily budget used (${book.spent}/${DAILY_CREDITS} credits; a clip needs up to ${MAX_CREDITS}). Resuming tomorrow.`);
-    return 30 * 60;
+    return 10 * 60;
   }
   const problem = await flowReady();
   if (problem) {
+    // No check-in while Flow can't work: the studio then stops planning clips after 15 minutes.
     log(problem);
     return POLL_SECONDS;
   }
-  const job = await lumen("/api/flow/claim");
+  const job = await lumen("/api/flow/claim", { creditsLeft: left });
   if (!job) return POLL_SECONDS;
   log(`Claimed scene ${job.sceneId}${job.character ? ` with host "${job.character.name}"` : ""}.`);
   try {

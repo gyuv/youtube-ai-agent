@@ -16,7 +16,9 @@ import { queueSceneClip } from "./wan2gp";
  * is spent. The verdict is recorded on the scene so a video is planned once.
  */
 
-export const FLOW_ENGINE = "FLOW";
+import { FLOW_ENGINE } from "./flowWorker";
+
+export { FLOW_ENGINE };
 /** Recorded on a scene Script Lab chose not to animate, so it isn't planned again. */
 export const PLAN_DECLINED_PREFIX = "Script Lab plan: kept the still.";
 

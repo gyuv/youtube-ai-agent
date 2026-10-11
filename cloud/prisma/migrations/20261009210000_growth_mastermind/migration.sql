@@ -46,6 +46,15 @@ CREATE TABLE "BrandAsset" (
     CONSTRAINT "BrandAsset_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "WorkerHeartbeat" (
+    "engine" TEXT NOT NULL,
+    "seenAt" TIMESTAMP(3) NOT NULL,
+    "creditsLeft" INTEGER,
+
+    CONSTRAINT "WorkerHeartbeat_pkey" PRIMARY KEY ("engine")
+);
+
 -- CreateIndex
 CREATE INDEX "MastermindRequest_channelId_status_idx" ON "MastermindRequest"("channelId", "status");
 

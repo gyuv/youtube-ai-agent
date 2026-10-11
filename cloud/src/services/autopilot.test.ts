@@ -20,6 +20,10 @@ vi.mock("./publish", () => publish);
 vi.mock("./analytics", () => analytics);
 vi.mock("./labsAutomation", () => labs);
 vi.mock("./overdue", () => ({ rescheduleOverdue: vi.fn(async () => 0) }));
+const flowWorker = vi.hoisted(() => ({ flowWorkerStatus: vi.fn(), dropQueuedFlowClips: vi.fn() }));
+const flowPlan = vi.hoisted(() => ({ planFlowHook: vi.fn() }));
+vi.mock("./flowWorker", () => flowWorker);
+vi.mock("./flowPlan", async (importActual) => ({ ...(await importActual<typeof import("./flowPlan")>()), ...flowPlan }));
 vi.mock("./mastermind", () => ({ findChannelForMastermind: vi.fn(async () => null), runMastermind: vi.fn() }));
 
 import { MAX_AUTOPILOT_FAILURES, PINTEREST_WAIT_MS, PROVIDER_RETRY_MS, autopilotTick, createVideoNow, createVideosAhead } from "./autopilot";
@@ -84,6 +88,9 @@ beforeEach(() => {
   publish.findVideoToAutoPublish.mockResolvedValue(null);
   analytics.findChannelToAnalyze.mockResolvedValue(null);
   labs.findChannelForGrowthReview.mockResolvedValue(null);
+  flowWorker.flowWorkerStatus.mockReset().mockResolvedValue({ ready: false });
+  flowWorker.dropQueuedFlowClips.mockReset().mockResolvedValue(0);
+  flowPlan.planFlowHook.mockReset();
 });
 
 describe("auto-publish catch-up", () => {
@@ -375,5 +382,43 @@ describe("making future videos on request", () => {
     const created = await createVideosAhead("c1", 3, NOW);
     expect(created.map((c) => c.slot?.toISOString())).toEqual(["2026-09-29T18:00:00.000Z", "2026-09-30T18:00:00.000Z", "2026-10-01T18:00:00.000Z"]);
     expect(created.map((c) => c.topic)).toEqual(["A topic one", "A topic two", "A topic three"]);
+  });
+});
+
+describe("Google Flow hook clips", () => {
+  const flowChannel = { ...CHANNEL, flowHookClips: true };
+  const readyVideo = () => project({ status: "ASSETS_READY", labsAppliedAt: new Date() });
+
+  it("skips Flow entirely and renders on time when no worker is there", async () => {
+    db.channel.findMany.mockResolvedValue([flowChannel]);
+    projectsQuery({ work: [readyVideo()] });
+    const result = await autopilotTick(NOW);
+    expect(result.action).toBe("dispatched");
+    expect(flowPlan.planFlowHook).not.toHaveBeenCalled();
+  });
+
+  it("has Script Lab plan the hook first when a worker is ready", async () => {
+    db.channel.findMany.mockResolvedValue([flowChannel]);
+    flowWorker.flowWorkerStatus.mockResolvedValue({ ready: true });
+    flowPlan.planFlowHook.mockResolvedValue({ animate: true, prompt: "p", reason: "a reveal", sceneId: "s0" });
+    projectsQuery({ work: [readyVideo()] });
+    const result = await autopilotTick(NOW);
+    expect(flowPlan.planFlowHook).toHaveBeenCalledWith("p1");
+    expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
+    expect(result.message).toContain("queued it for your Flow worker");
+  });
+
+  it("waits for a queued clip only while a worker is ready, and withdraws it at render", async () => {
+    db.channel.findMany.mockResolvedValue([flowChannel]);
+    const queued = readyVideo();
+    queued.scenes[0] = { ...queued.scenes[0], aiClipEngine: "FLOW", aiClipStatus: "QUEUED", aiClipUpdatedAt: new Date(NOW.getTime() - 60_000) } as never;
+    projectsQuery({ work: [queued] });
+
+    flowWorker.flowWorkerStatus.mockResolvedValue({ ready: true });
+    expect((await autopilotTick(NOW)).action).not.toBe("dispatched");
+
+    flowWorker.flowWorkerStatus.mockResolvedValue({ ready: false });
+    expect((await autopilotTick(NOW)).action).toBe("dispatched");
+    expect(flowWorker.dropQueuedFlowClips).toHaveBeenCalledWith("p1", expect.stringContaining("still image"));
   });
 });
