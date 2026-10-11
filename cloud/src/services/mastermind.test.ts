@@ -9,6 +9,7 @@ const labs = vi.hoisted(() => ({ addTopicsToBacklog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("./pipeline", () => pipeline);
 vi.mock("./labsAutomation", () => labs);
+vi.mock("./brandAutopilot", () => ({ autoBrand: vi.fn() }));
 
 import { applyPlan, buildMastermindPrompt, parsePlan, type Candidate, type MastermindPlan } from "./mastermind";
 

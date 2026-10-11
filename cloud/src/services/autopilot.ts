@@ -357,7 +357,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
     const ids = { channelId: toMaster.id };
     try {
       const r = await runMastermind(toMaster, now);
-      const message = `${toMaster.name}: Growth Lab mastermind ${r.applied.length ? `changed ${r.applied.length} video${r.applied.length === 1 ? "" : "s"} (${r.applied.join("; ").slice(0, 400)})` : "kept every upcoming video"}${r.backlogAdded ? `, queued ${r.backlogAdded} topic${r.backlogAdded === 1 ? "" : "s"}` : ""}${r.requests ? `, and needs you for ${r.requests} thing${r.requests === 1 ? "" : "s"}` : ""}. ${r.diagnosis}`.slice(0, 1500);
+      const message = `${toMaster.name}: Growth Lab mastermind ${r.applied.length ? `changed ${r.applied.length} video${r.applied.length === 1 ? "" : "s"} (${r.applied.join("; ").slice(0, 400)})` : "kept every upcoming video"}${r.branding?.length ? `, ${r.branding.join(", ")}` : ""}${r.backlogAdded ? `, queued ${r.backlogAdded} topic${r.backlogAdded === 1 ? "" : "s"}` : ""}${r.requests ? `, and needs you for ${r.requests} thing${r.requests === 1 ? "" : "s"}` : ""}. ${r.diagnosis}`.slice(0, 1500);
       await log("info", "mastermind", message, ids);
       return { action: "mastermind", message, more: true, swept, ...ids };
     } catch (error) {
