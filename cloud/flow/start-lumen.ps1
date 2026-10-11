@@ -102,6 +102,23 @@ function StartFlowMcp {
 }
 StartFlowMcp
 
+# Google sign-in: if flow-mcp reports it's signed out, open the sign-in window once and wait for it.
+function EnsureSignedIn {
+  if (-not (FlowMcpUp)) { return }
+  $tokenFile = Join-Path $HOME ".flow-mcp\token"
+  if (-not (Test-Path $tokenFile)) { return }
+  try {
+    $status = Invoke-RestMethod "http://127.0.0.1:8787/api/status" -Method Post -ContentType "application/json" -Body '{"detailed":false}' -Headers @{ "x-flow-token" = (Get-Content $tokenFile -Raw).Trim() } -TimeoutSec 20 -ErrorAction Stop
+  } catch { return }
+  if ($status.flow -and $status.flow.signedIn -eq $false) {
+    Say "Google is signed out of Flow. A Chrome window opens: sign in, open https://labs.google/flow, then close that window." "Yellow"
+    Push-Location $FlowMcp; npm run login; Pop-Location
+  } elseif ($status.flow -and $status.flow.inProject -eq $false) {
+    Say "Open (or create) a project in the flow-mcp Chrome window at https://labs.google/flow; the worker waits for it." "Yellow"
+  }
+}
+EnsureSignedIn
+
 # 5. Run the worker, always the latest version, and bring it back if it stops.
 $restarts = 0
 while ($true) {
@@ -114,6 +131,7 @@ while ($true) {
   if (-not (Test-Path $Worker)) { Say "No worker file yet; retrying in 60s." "Red"; Start-Sleep 60; continue }
 
   StartFlowMcp
+  EnsureSignedIn
   Say "Starting the Lumen Flow worker..." "Green"
   node $Worker
   $restarts++
