@@ -44,6 +44,19 @@ Studio (Vercel) ──plans + queues──▶ /api/flow/claim ◀──polls─�
 
 Keep the computer awake while it runs: Flow is driven through a real browser window.
 
+## One-click launcher (Windows)
+
+`start-lumen.ps1` does all of the above and keeps it running: it asks for your studio address and
+secret once, installs flow-mcp on first run, starts it, keeps the PC awake, downloads the latest worker
+on each start and restarts it if it stops.
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/gyuv/youtube-ai-agent/claude/epic-cannon-4u9o4s/cloud/flow/start-lumen.ps1 -OutFile start-lumen.ps1
+powershell -ExecutionPolicy Bypass -File start-lumen.ps1
+```
+
+`-Reset` forgets the saved settings.
+
 ## Settings
 
 | Variable | Default | |
