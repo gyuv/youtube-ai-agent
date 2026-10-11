@@ -43,3 +43,11 @@ describe("paginateCaptions", () => {
     expect(pages.at(-1)!.endMs).toBe(3500);
   });
 });
+
+describe("channel branding", () => {
+  it("adds the intro and outro to the length only when the channel is branded", async () => {
+    const { INTRO_FRAMES, OUTRO_FRAMES, totalFrames } = await import("./timeline");
+    const scenes = [{ durationSeconds: 2 }];
+    expect(totalFrames(scenes, { name: "K", color: "#fff", avatarSrc: null, cta: "x" }) - totalFrames(scenes)).toBe(INTRO_FRAMES + OUTRO_FRAMES);
+  });
+});

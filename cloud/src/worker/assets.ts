@@ -92,5 +92,6 @@ export async function prepareRenderProps(job: RenderJob, publicDir: string, opti
     };
   });
 
-  return { format: job.format, captions: job.captions, scenes };
+  const brand = job.brand ? { name: job.brand.name, color: job.brand.color, avatarSrc: job.brand.avatarUrl, cta: job.brand.cta } : null;
+  return { format: job.format, captions: job.captions, scenes, brand };
 }

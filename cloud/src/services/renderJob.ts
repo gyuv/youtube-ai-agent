@@ -35,7 +35,10 @@ function clip(text: string, max = 2000): string {
 async function onStarted(e: Extract<RenderEvent, { event: "started" }>): Promise<StartedResponse> {
   const project = await prisma.videoProject.findUnique({
     where: { id: e.projectId },
-    include: { scenes: { orderBy: { sceneIndex: "asc" } } },
+    include: {
+      scenes: { orderBy: { sceneIndex: "asc" } },
+      channel: { select: { name: true, brandFrame: true, brandAssets: { where: { kind: "avatar" }, orderBy: { createdAt: "desc" }, take: 1, select: { imageUrl: true } } } },
+    },
   });
   if (!project) throw new PipelineError("NOT_FOUND", `Project ${e.projectId} not found.`);
 
@@ -85,6 +88,9 @@ async function onStarted(e: Extract<RenderEvent, { event: "started" }>): Promise
         words: words.success ? words.data : [],
       };
     }),
+    brand: project.channel.brandFrame
+      ? { name: project.channel.name, color: "#FFB703", avatarUrl: project.channel.brandAssets[0]?.imageUrl ?? null, cta: "Subscribe for a new story every day!" }
+      : null,
     upload: { url: upload.url, method: upload.method, headers: upload.headers },
     maxBytes: maxObjectBytes(),
   };
