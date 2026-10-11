@@ -10,6 +10,7 @@ import { uploadObject } from "@/lib/storage";
 import { dispatchRenderWorkflow } from "./renderDispatcher";
 import { estimateSpeechSeconds, generateScript } from "./scriptGenerator";
 import { DEFAULT_VOICE, synthesizeSpeech } from "./ttsGenerator";
+import { voiceForLanguage } from "@/lib/voices";
 import { canvasFor, findStockVisual, generatePollinationsImage } from "./visualFetcher";
 
 /**
@@ -171,7 +172,7 @@ export async function regenerateSceneAudio(sceneId: string, options: { narration
   const scene = await loadScene(sceneId);
   const { project } = scene;
   const text = options.narrationText?.trim() || scene.narrationText;
-  const voice = project.voice ?? project.channel.defaultVoice ?? DEFAULT_VOICE;
+  const voice = voiceForLanguage(project.voice ?? project.channel.defaultVoice ?? DEFAULT_VOICE, project.channel.language);
 
   const speech = await synthesizeSpeech(text, { voice });
   const path = `projects/${project.id}/scenes/${scene.id}/voice-${shortHash(text, speech.voice)}.${speech.contentType === "audio/wav" ? "wav" : "mp3"}`;
