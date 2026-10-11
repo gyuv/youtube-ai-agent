@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({ brandAsset: { findUnique: vi.fn(), update: vi.fn() } }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("./youtube", () => ({ MANAGE_SCOPE: "manage", getChannelAccessToken: vi.fn(async () => "tok") }));
+vi.mock("sharp", () => ({ default: () => { const c = { rotate: () => c, resize: () => c, flatten: () => c, jpeg: () => c, toBuffer: async () => Buffer.from([9]) }; return c; } }));
 vi.mock("@/lib/storage", () => ({ uploadObject: vi.fn() }));
 
 import { applyBanner, buildBrandPrompt, canSetBanner } from "./branding";
@@ -35,6 +36,8 @@ describe("applyBanner", () => {
       }),
     );
     await applyBanner("b1");
+    const upload = calls.find((c) => c.url.includes("channelBanners/insert"))!;
+    expect((upload.init!.headers as Record<string, string>)["Content-Type"]).toBe("image/jpeg");
     const put = calls.find((c) => c.init?.method === "PUT")!;
     expect(JSON.parse(put.init!.body as string)).toEqual({
       id: "UC1",
@@ -63,3 +66,4 @@ it("asks for images without text and honest subscribe appeals", () => {
   expect(system).toContain("no giveaways");
   expect(prompt).toContain("98px");
 });
+
