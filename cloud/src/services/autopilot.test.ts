@@ -21,7 +21,7 @@ vi.mock("./analytics", () => analytics);
 vi.mock("./labsAutomation", () => labs);
 vi.mock("./overdue", () => ({ rescheduleOverdue: vi.fn(async () => 0) }));
 vi.mock("./officer", () => ({ runOfficer: vi.fn(async () => ({ resolved: [], open: [] })) }));
-const flowWorker = vi.hoisted(() => ({ flowWorkerStatus: vi.fn(), dropQueuedFlowClips: vi.fn() }));
+const flowWorker = vi.hoisted(() => ({ FLOW_ENGINE: "FLOW", flowWorkerStatus: vi.fn(), dropQueuedFlowClips: vi.fn() }));
 const flowPlan = vi.hoisted(() => ({ planFlowHook: vi.fn(), planFlowScenes: vi.fn(async () => ({ queued: 2 })) }));
 const wan2gp = vi.hoisted(() => ({ queueSceneClip: vi.fn() }));
 vi.mock("./wan2gp", () => wan2gp);
@@ -459,6 +459,14 @@ describe("Google Flow only", () => {
     const result = await autopilotTick(NOW);
     expect(wan2gp.queueSceneClip).toHaveBeenCalledWith(expect.any(String), "shot", "FLOW");
     expect(result.message).toContain("asked Google Flow again");
+  });
+
+  it("treats stock clips as missing: a scene with a Pexels clip still gets a Flow shot", async () => {
+    db.channel.findMany.mockResolvedValue([onlyChannel]);
+    projectsQuery({ work: [video({ videoClipUrl: "https://pexels/clip.mp4" })] });
+    expect((await autopilotTick(NOW)).action).toBe("planned");
+    expect(flowPlan.planFlowScenes).toHaveBeenCalledWith("p1");
+    expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
   });
 
   it("renders once every scene is a Flow clip", async () => {

@@ -24,7 +24,7 @@ beforeEach(() => {
 
 describe("runOfficer", () => {
   it("revives a video the autopilot gave up on and logs the resolved query", async () => {
-    db.videoProject.findMany.mockResolvedValue([stuck()]);
+    db.videoProject.findMany.mockResolvedValueOnce([stuck()]);
     const r = await runOfficer(3, NOW);
     expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "p1" }, data: expect.objectContaining({ autopilotFailures: 0, status: "ASSETS_READY" }) });
     expect(db.mastermindRequest.create).toHaveBeenCalledWith({ data: expect.objectContaining({ kind: "incident", status: "done" }) });
@@ -32,7 +32,7 @@ describe("runOfficer", () => {
   });
 
   it("drops the topic and frees the slot after the revivals run out", async () => {
-    db.videoProject.findMany.mockResolvedValue([stuck({ scenes: [] })]);
+    db.videoProject.findMany.mockResolvedValueOnce([stuck({ scenes: [] })]);
     db.mastermindRequest.count.mockResolvedValue(MAX_REVIVES);
     await runOfficer(3, NOW);
     expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "p1" }, data: { autopilot: false, scheduledFor: null } });
@@ -50,4 +50,17 @@ describe("runOfficer", () => {
     await runOfficer(3, NOW);
     expect(db.mastermindRequest.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "done", resolvedAt: NOW } });
   });
+});
+
+it("keeps a Flow-only video rendered from stock clips off YouTube and sends it back for Flow clips", async () => {
+  const stock = { videoClipUrl: "https://pexels/clip.mp4", aiClipEngine: null, aiClipStatus: null, locked: false };
+  const flow = { videoClipUrl: "https://cdn/flow.mp4", aiClipEngine: "FLOW", aiClipStatus: null, locked: false };
+  db.videoProject.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+    { id: "p2", channelId: "c1", title: "Crow", topic: "crow", scenes: [flow, stock] },
+    { id: "p3", channelId: "c1", title: "Song", topic: "song", scenes: [flow, flow] },
+  ]);
+  const r = await runOfficer(3, NOW);
+  expect(db.videoProject.update).toHaveBeenCalledTimes(1);
+  expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "p2" }, data: { status: "ASSETS_READY", autopilotFailures: 0 } });
+  expect(r.resolved).toEqual(['held back "Crow" until every scene is a Flow clip']);
 });

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { analyzeChannel, findChannelToAnalyze } from "./analytics";
 import { findChannelForGrowthReview, packageProject, runGrowthReview } from "./labsAutomation";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets, sceneNeedsFill } from "./pipeline";
-import { needsFlowPlan, planFlowHook, planFlowScenes } from "./flowPlan";
+import { isFlowClip, needsFlowPlan, needsFlowShot, planFlowHook, planFlowScenes } from "./flowPlan";
 import { dropQueuedFlowClips, flowWorkerStatus } from "./flowWorker";
 import { growthBrief } from "./growthGoal";
 import { findChannelForMastermind, runMastermind } from "./mastermind";
@@ -202,10 +202,11 @@ function findWork(projects: WorkProject[], channels: Map<string, AutopilotChanne
     if (awaitingPinterest(p, now, flowReady, channel.flowOnly)) continue;
     if (channel.flowOnly && p.status === ProjectStatus.ASSETS_READY) {
       // Every scene a Flow clip: plan the shots once, retry any that failed, and render only when all exist.
-      if (p.scenes.some((s) => needsFlowPlan(s as Parameters<typeof needsFlowPlan>[0]))) return { kind: "flowscenes" as const, project: p, channel };
+      if (p.scenes.some((s) => needsFlowShot(s))) return { kind: "flowscenes" as const, project: p, channel };
       const failed = p.scenes.filter((s) => s.aiClipEngine === "FLOW" && s.aiClipStatus === "FAILED" && !s.locked);
       if (failed.length) return { kind: "flowretry" as const, project: p, channel, sceneIds: failed.map((s) => s.id) };
-      if (!p.scenes.every((s) => s.videoClipUrl || s.locked)) continue;
+      // Only real Flow clips count: a stand-in stock clip or image never reaches a Flow-only video.
+      if (!p.scenes.every((s) => isFlowClip(s) || s.locked)) continue;
     }
     // Google Flow on and a worker there to make it: Script Lab plans the hook clip once, before the video renders.
     if (flowReady && p.status === ProjectStatus.ASSETS_READY && channel.flowHookClips && needsFlowPlan(p.scenes[0] as Parameters<typeof needsFlowPlan>[0])) {
