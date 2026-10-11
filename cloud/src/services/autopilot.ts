@@ -42,6 +42,8 @@ import { queueSceneClip } from "./wan2gp";
  */
 
 export const MAX_AUTOPILOT_FAILURES = 3;
+/** A Flow clip is asked for again this many times before its failure counts against the video. */
+export const MAX_FLOW_RETRIES = 5;
 /** How long a project waits after an outside service refused before autopilot tries it again. */
 export const PROVIDER_RETRY_MS = 60 * 60 * 1000;
 export const STALE_RENDER_MS = 3 * 60 * 60 * 1000;
@@ -92,7 +94,7 @@ type WorkProject = Pick<VideoProject, "id" | "channelId" | "status" | "topic" | 
   autopilotRetryAt?: Date | null;
   labsAppliedAt?: Date | null;
   scenes: (Pick<Scene, "id" | "sceneIndex" | "locked" | "voiceAudioUrl" | "imageUrl" | "videoClipUrl" | "durationSeconds"> &
-    Partial<Pick<Scene, "aiClipEngine" | "aiClipStatus" | "aiClipUpdatedAt" | "aiClipPrompt">>)[];
+    Partial<Pick<Scene, "aiClipEngine" | "aiClipStatus" | "aiClipUpdatedAt" | "aiClipPrompt" | "aiClipRequestId">>)[];
 };
 
 /** How long a render waits for the Pinterest worker before going out with the placeholder image. */
@@ -440,6 +442,7 @@ async function tick(now: Date): Promise<TickResult> {
           aiClipStatus: true,
           aiClipUpdatedAt: true,
           aiClipPrompt: true,
+          aiClipRequestId: true,
         },
       },
     },
@@ -465,13 +468,17 @@ async function tick(now: Date): Promise<TickResult> {
         return { action: "planned", message, more: true, swept, ...ids };
       }
       if (work.kind === "flowretry") {
-        // A failed clip is asked for again; each round uses one of the video's attempts, so a clip that always fails stops.
-        if (project.autopilotFailures + 1 >= MAX_AUTOPILOT_FAILURES) throw new Error(`Google Flow kept failing on ${work.sceneIds.length} scene${work.sceneIds.length === 1 ? "" : "s"}; see the scene errors.`);
+        // Flow is flaky, so a failed clip is simply asked for again: each scene gets its own retries
+        // (counted on the scene), and only a scene that keeps failing costs the video an attempt.
+        const exhausted: string[] = [];
         for (const sceneId of work.sceneIds) {
           const scene = project.scenes.find((s) => s.id === sceneId);
+          const retries = Number(/^retry:(\d+)$/.exec(scene?.aiClipRequestId ?? "")?.[1] ?? 0);
+          if (retries >= MAX_FLOW_RETRIES) exhausted.push(sceneId);
           await queueSceneClip(sceneId, scene?.aiClipPrompt ?? undefined, "FLOW");
+          await prisma.scene.update({ where: { id: sceneId }, data: { aiClipRequestId: `retry:${retries >= MAX_FLOW_RETRIES ? 0 : retries + 1}` } });
         }
-        await prisma.videoProject.update({ where: { id: project.id }, data: { autopilotFailures: { increment: 1 } } });
+        if (exhausted.length) await prisma.videoProject.update({ where: { id: project.id }, data: { autopilotFailures: { increment: 1 } } });
         const message = `${label(project)}: asked Google Flow again for ${work.sceneIds.length} scene${work.sceneIds.length === 1 ? "" : "s"} that failed.`;
         await log("info", "flowplan", message, ids);
         return { action: "planned", message, more: true, swept, ...ids };
