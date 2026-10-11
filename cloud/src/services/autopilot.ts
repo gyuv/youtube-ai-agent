@@ -318,9 +318,35 @@ async function nextTopic(channel: AutopilotChannel): Promise<{ topic: string; so
 
 let officerError: string | null = null;
 
+/** One line on the Google Flow queue for the run log: counts, what's running, and why anything failed. */
+async function flowQueueLine(now: Date): Promise<string | null> {
+  const scenes = await prisma.scene.findMany({
+    where: { aiClipEngine: "FLOW", aiClipStatus: { in: ["QUEUED", "RUNNING", "FAILED"] } },
+    select: { sceneIndex: true, aiClipStatus: true, aiClipError: true, aiClipUpdatedAt: true, aiClipRequestId: true, project: { select: { title: true, topic: true, status: true } } },
+  });
+  if (!scenes.length) return null;
+  const count = (st: string) => scenes.filter((s) => s.aiClipStatus === st).length;
+  const running = scenes.find((s) => s.aiClipStatus === "RUNNING");
+  const failed = scenes.filter((s) => s.aiClipStatus === "FAILED").slice(0, 3);
+  const name = (s: (typeof scenes)[number]) => `"${(s.project.title ?? s.project.topic).slice(0, 40)}" scene ${s.sceneIndex + 1}`;
+  const worker = await flowWorkerStatus(now);
+  return [
+    `Flow queue: ${count("QUEUED")} queued, ${count("RUNNING")} running, ${count("FAILED")} failed; worker ${worker.online ? `online${worker.creditsLeft !== null ? `, ${worker.creditsLeft} credits left` : ""}` : "offline"}`,
+    running ? `making ${name(running)} since ${running.aiClipUpdatedAt?.toISOString().slice(11, 16)} UTC` : "",
+    ...failed.map((s) => `${name(s)} failed (${s.aiClipRequestId ?? "retry:0"}, project ${s.project.status}): ${(s.aiClipError ?? "").slice(0, 200)}`),
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
 export async function autopilotTick(now: Date = new Date()): Promise<TickResult> {
   officerError = null;
   const result = await tick(now);
+  // Idle runs report the Flow queue, so a stuck clip and its reason show in the run's log.
+  if (result.action === "idle") {
+    const line = await flowQueueLine(now).catch((error) => `Flow queue unavailable: ${errorMessage(error)}`);
+    if (line) result.message = `${result.message} ${line}`;
+  }
   // An officer failure is otherwise only in the server log: surface it in the run's own log.
   return officerError ? { ...result, message: `${result.message} [${officerError}]` } : result;
 }

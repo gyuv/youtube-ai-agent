@@ -1,5 +1,6 @@
 import { BadgeDollarSign, Brain, Clapperboard, CheckCircle2, Inbox, Link2, Palette, Target, Unlink, Youtube } from "lucide-react";
 import { BrandStudio } from "@/components/growth/brand-studio";
+import { FlowQueue } from "@/components/growth/flow-queue";
 import { FlowSettings } from "@/components/growth/flow-settings";
 import { GoalPicker } from "@/components/growth/goal-picker";
 import { MonetizationTracker } from "@/components/growth/monetization-tracker";
@@ -201,6 +202,12 @@ export default async function ChannelPage({
             initial={{ flowHookClips: channel.flowHookClips, flowOnly: channel.flowOnly, mascotName: channel.mascotName, mascotLook: channel.mascotLook }}
             worker={{ online: flowWorker.online, ready: flowWorker.ready, creditsLeft: flowWorker.creditsLeft, seenAgo: flowWorker.seenAt ? timeAgo(flowWorker.seenAt, now) : null }}
           />
+          {channel.flowOnly || channel.flowHookClips ? (
+            <div className="mt-6 border-t pt-5">
+              <p className="mb-3 text-sm font-medium">Flow progress</p>
+              <FlowQueue channelId={channel.id} />
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
