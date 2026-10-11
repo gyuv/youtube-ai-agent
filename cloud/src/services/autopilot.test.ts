@@ -20,6 +20,7 @@ vi.mock("./publish", () => publish);
 vi.mock("./analytics", () => analytics);
 vi.mock("./labsAutomation", () => labs);
 vi.mock("./overdue", () => ({ rescheduleOverdue: vi.fn(async () => 0) }));
+vi.mock("./officer", () => ({ runOfficer: vi.fn(async () => ({ resolved: [], open: [] })) }));
 const flowWorker = vi.hoisted(() => ({ flowWorkerStatus: vi.fn(), dropQueuedFlowClips: vi.fn() }));
 const flowPlan = vi.hoisted(() => ({ planFlowHook: vi.fn(), planFlowScenes: vi.fn(async () => ({ queued: 2 })) }));
 const wan2gp = vi.hoisted(() => ({ queueSceneClip: vi.fn() }));

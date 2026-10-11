@@ -10,6 +10,7 @@ import { dropQueuedFlowClips, flowWorkerStatus } from "./flowWorker";
 import { growthBrief } from "./growthGoal";
 import { findChannelForMastermind, runMastermind } from "./mastermind";
 import { pollMuapiClips } from "./muapi";
+import { runOfficer } from "./officer";
 import { rescheduleOverdue } from "./overdue";
 import { findVideoToAutoPublish, publishRenderedProject } from "./publish";
 import { firstFreeSlot, formatSlot, isValidCron } from "./schedule";
@@ -314,6 +315,15 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
   const swept = await sweepStaleRenders(now);
   // Before publishing or planning, so a missed video takes the next slot instead of a new one.
   await rescheduleOverdue(now, MAX_AUTOPILOT_FAILURES);
+  // The mastermind's officer revives or replaces anything that stopped, before any work is picked.
+  try {
+    const officer = await runOfficer(MAX_AUTOPILOT_FAILURES, now);
+    if (officer.resolved.length || officer.open.length) {
+      await log(officer.open.length ? "error" : "info", "officer", `Mastermind officer: ${[...officer.resolved, ...officer.open.map((o) => `needs you: ${o}`)].join("; ")}.`.slice(0, 1500));
+    }
+  } catch (error) {
+    console.error("Mastermind officer failed", error);
+  }
   await pollMuapiClips(undefined, now).catch((error) => console.error("Muapi poll failed", error));
 
   // Rendered videos waiting for YouTube go first: on auto-publish channels they shouldn't sit idle,

@@ -1,6 +1,7 @@
 "use client";
 
 import { Brain, LoaderCircle, RefreshCw } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { refreshStatsAction, runMastermindNowAction } from "@/app/(studio)/growth-lab/actions";
@@ -8,6 +9,7 @@ import { Button } from "@/components/ui/button";
 
 export function RunMastermindButton({ channelId, size = "sm" }: { channelId: string; size?: "sm" | "default" }) {
   const [pending, start] = useTransition();
+  const router = useRouter();
   return (
     <Button
       size={size}
@@ -15,12 +17,14 @@ export function RunMastermindButton({ channelId, size = "sm" }: { channelId: str
       onClick={() =>
         start(async () => {
           const result = await runMastermindNowAction(channelId);
-          if (result.ok) toast.success(`Mastermind ${result.data.applied ? `changed ${result.data.applied} video(s)` : "kept every video"}. ${result.data.diagnosis}`);
-          else toast.error(result.error);
+          if (result.ok) {
+            toast.success(`Mastermind finished: ${result.data.applied ? `changed ${result.data.applied} video(s)` : "kept every video"}. ${result.data.diagnosis}`, { duration: 15_000 });
+            router.refresh();
+          } else toast.error(`Mastermind didn't finish: ${result.error}`, { duration: 15_000 });
         })
       }
     >
-      {pending ? <LoaderCircle className="animate-spin" /> : <Brain />} {pending ? "Thinking…" : "Run mastermind now"}
+      {pending ? <LoaderCircle className="animate-spin" /> : <Brain />} {pending ? "Running… about a minute" : "Run mastermind now"}
     </Button>
   );
 }
