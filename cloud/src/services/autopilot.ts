@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { analyzeChannel, findChannelToAnalyze } from "./analytics";
 import { findChannelForGrowthReview, packageProject, runGrowthReview } from "./labsAutomation";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets, sceneNeedsFill } from "./pipeline";
-import { needsFlowPlan, planFlowHook } from "./flowPlan";
+import { needsFlowPlan, planFlowHook, planFlowScenes } from "./flowPlan";
 import { dropQueuedFlowClips, flowWorkerStatus } from "./flowWorker";
 import { growthBrief } from "./growthGoal";
 import { findChannelForMastermind, runMastermind } from "./mastermind";
@@ -16,6 +16,7 @@ import { firstFreeSlot, formatSlot, isValidCron } from "./schedule";
 import { proposeTopic } from "./topicPlanner";
 import { checkYouTubeVisibility } from "./youtube";
 import { SCHEDULE_GRACE_MS } from "./youtubeVisibility";
+import { queueSceneClip } from "./wan2gp";
 
 /**
  * The autopilot. A GitHub Actions workflow calls `autopilotTick` repeatedly; each call does at
@@ -83,13 +84,14 @@ type AutopilotChannel = Pick<
   | "mastermind"
   | "mastermindNotes"
   | "flowHookClips"
+  | "flowOnly"
 >;
 
 type WorkProject = Pick<VideoProject, "id" | "channelId" | "status" | "topic" | "title" | "autopilotFailures" | "scheduledFor"> & {
   autopilotRetryAt?: Date | null;
   labsAppliedAt?: Date | null;
   scenes: (Pick<Scene, "id" | "sceneIndex" | "locked" | "voiceAudioUrl" | "imageUrl" | "videoClipUrl" | "durationSeconds"> &
-    Partial<Pick<Scene, "aiClipEngine" | "aiClipStatus" | "aiClipUpdatedAt">>)[];
+    Partial<Pick<Scene, "aiClipEngine" | "aiClipStatus" | "aiClipUpdatedAt" | "aiClipPrompt">>)[];
 };
 
 /** How long a render waits for the Pinterest worker before going out with the placeholder image. */
@@ -112,8 +114,10 @@ const FLOW_RUNNING_WAIT_MS = 45 * 60 * 1000;
  * A Pinterest search or Flow clip is still in flight (and recent), so a scene's visual is about to
  * change. A queued Flow clip is only worth waiting for while a worker is there to make it.
  */
-function awaitingPinterest(p: WorkProject, now: Date, flowReady: boolean): boolean {
+function awaitingPinterest(p: WorkProject, now: Date, flowReady: boolean, flowOnly = false): boolean {
   return p.scenes.some((s) => {
+    // Flow-only channels never fall back to a still, so a clip in flight is always waited for.
+    if (flowOnly && s.aiClipEngine === "FLOW") return s.aiClipStatus === "QUEUED" || s.aiClipStatus === "RUNNING";
     const since = now.getTime() - (s.aiClipUpdatedAt?.getTime() ?? 0);
     if (s.aiClipEngine === "PINTEREST") return (s.aiClipStatus === "QUEUED" || s.aiClipStatus === "RUNNING") && since < PINTEREST_WAIT_MS;
     if (s.aiClipEngine === "FLOW") {
@@ -194,7 +198,14 @@ function findWork(projects: WorkProject[], channels: Map<string, AutopilotChanne
   projects = projects.filter((p) => !p.autopilotRetryAt || p.autopilotRetryAt.getTime() <= now.getTime());
   for (const p of projects) {
     const channel = channels.get(p.channelId)!;
-    if (awaitingPinterest(p, now, flowReady)) continue;
+    if (awaitingPinterest(p, now, flowReady, channel.flowOnly)) continue;
+    if (channel.flowOnly && p.status === ProjectStatus.ASSETS_READY) {
+      // Every scene a Flow clip: plan the shots once, retry any that failed, and render only when all exist.
+      if (p.scenes.some((s) => needsFlowPlan(s as Parameters<typeof needsFlowPlan>[0]))) return { kind: "flowscenes" as const, project: p, channel };
+      const failed = p.scenes.filter((s) => s.aiClipEngine === "FLOW" && s.aiClipStatus === "FAILED" && !s.locked);
+      if (failed.length) return { kind: "flowretry" as const, project: p, channel, sceneIds: failed.map((s) => s.id) };
+      if (!p.scenes.every((s) => s.videoClipUrl || s.locked)) continue;
+    }
     // Google Flow on and a worker there to make it: Script Lab plans the hook clip once, before the video renders.
     if (flowReady && p.status === ProjectStatus.ASSETS_READY && channel.flowHookClips && needsFlowPlan(p.scenes[0] as Parameters<typeof needsFlowPlan>[0])) {
       return { kind: "flowplan" as const, project: p, channel };
@@ -402,13 +413,14 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
           aiClipEngine: true,
           aiClipStatus: true,
           aiClipUpdatedAt: true,
+          aiClipPrompt: true,
         },
       },
     },
   });
 
   // Only ask about the Flow worker when a channel uses Flow; without a ready worker, Flow is skipped entirely.
-  const flowReady = channels.some((c) => c.flowHookClips) ? (await flowWorkerStatus(now)).ready : false;
+  const flowReady = channels.some((c) => c.flowHookClips || c.flowOnly) ? (await flowWorkerStatus(now)).ready : false;
   const work = findWork(projects, byId, now, flowReady);
   if (work) {
     const { project, channel } = work;
@@ -419,6 +431,24 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
         const message = `${label(project)}: Creator Labs applied ${applied.join(", ") || "nothing"}${failed.length ? ` (skipped: ${failed.join("; ").slice(0, 300)})` : ""}.`;
         await log(failed.length && !applied.length ? "error" : "info", "packaged", message, ids);
         return { action: "packaged", message, more: true, swept, ...ids };
+      }
+      if (work.kind === "flowscenes") {
+        const { queued } = await planFlowScenes(project.id);
+        const message = `${label(project)}: Script Lab wrote a cinematic shot list and queued ${queued} Google Flow clip${queued === 1 ? "" : "s"} for your Flow worker; the video renders once every scene is a Flow clip.`;
+        await log("info", "flowplan", message, ids);
+        return { action: "planned", message, more: true, swept, ...ids };
+      }
+      if (work.kind === "flowretry") {
+        // A failed clip is asked for again; each round uses one of the video's attempts, so a clip that always fails stops.
+        if (project.autopilotFailures + 1 >= MAX_AUTOPILOT_FAILURES) throw new Error(`Google Flow kept failing on ${work.sceneIds.length} scene${work.sceneIds.length === 1 ? "" : "s"}; see the scene errors.`);
+        for (const sceneId of work.sceneIds) {
+          const scene = project.scenes.find((s) => s.id === sceneId);
+          await queueSceneClip(sceneId, scene?.aiClipPrompt ?? undefined, "FLOW");
+        }
+        await prisma.videoProject.update({ where: { id: project.id }, data: { autopilotFailures: { increment: 1 } } });
+        const message = `${label(project)}: asked Google Flow again for ${work.sceneIds.length} scene${work.sceneIds.length === 1 ? "" : "s"} that failed.`;
+        await log("info", "flowplan", message, ids);
+        return { action: "planned", message, more: true, swept, ...ids };
       }
       if (work.kind === "flowplan") {
         const plan = await planFlowHook(project.id);
@@ -431,7 +461,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       if (work.kind === "dispatch") {
         const retry = project.status === ProjectStatus.FAILED;
         // Rendering with the still now: a Flow clip still in the queue would only spend credits on a finished video.
-        await dropQueuedFlowClips(project.id, "Rendered with the still image before a Flow worker picked this clip up.");
+        if (!channel.flowOnly) await dropQueuedFlowClips(project.id, "Rendered with the still image before a Flow worker picked this clip up.");
         await dispatchCloudRender(project.id);
         // Each re-render of a failed video uses one attempt, so a render that always fails stops.
         if (retry) await prisma.videoProject.update({ where: { id: project.id }, data: { autopilotFailures: { increment: 1 } } });
@@ -454,7 +484,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       await log("info", "scripted", message, ids);
       return { action: "scripted", message, more: true, swept, ...ids };
     } catch (error) {
-      const step = work.kind === "flowplan" ? "Flow clip plan" : work.kind === "dispatch" ? "Render dispatch" : work.kind === "fill" ? "Asset generation" : work.kind === "package" ? "Creator Labs" : "Script writing";
+      const step = work.kind === "flowscenes" || work.kind === "flowretry" ? "Flow shot list" : work.kind === "flowplan" ? "Flow clip plan" : work.kind === "dispatch" ? "Render dispatch" : work.kind === "fill" ? "Asset generation" : work.kind === "package" ? "Creator Labs" : "Script writing";
       if (isProviderError(error)) {
         const message = await postpone(project, step, error, now);
         return { action: "waiting", message, more: true, swept, ...ids };
@@ -488,7 +518,16 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
   }
 
   const paused = await pausedChannels(channels, now);
-  const due = await findSlotsToPlan(channels.filter((c) => !paused.has(c.id)), now);
+  // A Flow-only channel makes one video at a time: its clips take days of free Flow credits.
+  const flowOnlyIds = channels.filter((c) => c.flowOnly).map((c) => c.id);
+  const busyFlow = flowOnlyIds.length
+    ? await prisma.videoProject.findMany({
+        where: { channelId: { in: flowOnlyIds }, status: { in: [ProjectStatus.DRAFT, ProjectStatus.SCRIPTED, ProjectStatus.ASSETS_READY] }, autopilotFailures: { lt: MAX_AUTOPILOT_FAILURES } },
+        select: { channelId: true },
+      })
+    : [];
+  const flowBusy = new Set(busyFlow.map((p) => p.channelId));
+  const due = await findSlotsToPlan(channels.filter((c) => !paused.has(c.id) && !flowBusy.has(c.id)), now);
   if (due.length === 0) {
     const pausedNames = channels.filter((c) => paused.has(c.id)).map((c) => c.name);
     if (pausedNames.length) {

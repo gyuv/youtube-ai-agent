@@ -123,6 +123,8 @@ model Channel {
   // Animate each autopilot video's hook scene with Google Flow (cloud/flow/ worker on the operator's PC),
   // after Script Lab plans the shot and judges it worth the credits.
   flowHookClips    Boolean    @default(false)
+  // Every scene is a Google Flow clip; a video renders only once all of them are made.
+  flowOnly         Boolean    @default(false)
   // The channel's recurring host: created once as a Google Flow character and attached to every Flow clip.
   mascotName       String?
   mascotLook       String?    @db.Text

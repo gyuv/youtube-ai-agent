@@ -7,7 +7,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("./wan2gp", () => wan);
 vi.mock("./gemini", async (importActual) => ({ ...(await importActual<typeof import("./gemini")>()), ...gemini }));
 
-import { PLAN_DECLINED_PREFIX, buildFlowPlanPrompt, needsFlowPlan, parseFlowPlan, planFlowHook } from "./flowPlan";
+import { PLAN_DECLINED_PREFIX, buildFlowPlanPrompt, buildFlowScenesPrompt, needsFlowPlan, parseFlowPlan, parseFlowShots, planFlowHook } from "./flowPlan";
 
 const hook = { id: "s0", sceneIndex: 0, narrationText: "This free AI feels illegal", visualPrompt: "a glowing laptop", imageUrl: "img", videoClipUrl: null, aiClipEngine: null, locked: false };
 const project = (channel: object = {}) => ({ id: "p1", title: "Free AI", topic: "t", format: "SHORT", channel: { niche: "AI tools", mascotName: null, mascotLook: null, ...channel }, scenes: [hook] });
@@ -55,4 +55,22 @@ it("writes the shot around the channel host when there is one", () => {
 
 it("rejects an approval without a usable prompt", () => {
   expect(() => parseFlowPlan(JSON.stringify({ animate: true, prompt: "go", reason: "x" }))).toThrow(/usable prompt/);
+});
+
+describe("Flow shot list", () => {
+  it("asks for one consistent cinematic shot per scene", () => {
+    const { system, prompt } = buildFlowScenesPrompt({
+      niche: "Tamil kids stories",
+      title: "The Thirsty Crow",
+      format: "SHORT",
+      scenes: [{ sceneIndex: 0, narration: "வணக்கம்", imagePrompt: "a crow" }, { sceneIndex: 1, narration: "pebbles", imagePrompt: "pot" }],
+      mascot: { name: "Kittu", look: "green parrot" },
+    });
+    expect(system).toContain("same characters");
+    expect(system).toContain("Kittu");
+    expect(prompt).toContain("Scene index 1");
+  });
+  it("parses shots", () => {
+    expect(parseFlowShots(JSON.stringify({ shots: [{ sceneIndex: 0, prompt: "A slow dolly toward a thirsty crow on a clay pot." }] }))).toHaveLength(1);
+  });
 });

@@ -21,7 +21,9 @@ vi.mock("./analytics", () => analytics);
 vi.mock("./labsAutomation", () => labs);
 vi.mock("./overdue", () => ({ rescheduleOverdue: vi.fn(async () => 0) }));
 const flowWorker = vi.hoisted(() => ({ flowWorkerStatus: vi.fn(), dropQueuedFlowClips: vi.fn() }));
-const flowPlan = vi.hoisted(() => ({ planFlowHook: vi.fn() }));
+const flowPlan = vi.hoisted(() => ({ planFlowHook: vi.fn(), planFlowScenes: vi.fn(async () => ({ queued: 2 })) }));
+const wan2gp = vi.hoisted(() => ({ queueSceneClip: vi.fn() }));
+vi.mock("./wan2gp", () => wan2gp);
 vi.mock("./flowWorker", () => flowWorker);
 vi.mock("./flowPlan", async (importActual) => ({ ...(await importActual<typeof import("./flowPlan")>()), ...flowPlan }));
 vi.mock("./mastermind", () => ({ findChannelForMastermind: vi.fn(async () => null), runMastermind: vi.fn() }));
@@ -74,6 +76,7 @@ function projectsQuery({
     if (args.where?.updatedAt) return stale;
     if (args.where?.youtubeLocked === false) return verify;
     if (args.where?.autopilot) return work;
+    if (args.where?.status && args.where?.channelId) return work; // Flow-only channels busy with a video
     if (args.where?.scheduledFor) return scheduled;
     if (args.take === 40) return recent;
     throw new Error(`unexpected query ${JSON.stringify(args)}`);
@@ -420,5 +423,47 @@ describe("Google Flow hook clips", () => {
     flowWorker.flowWorkerStatus.mockResolvedValue({ ready: false });
     expect((await autopilotTick(NOW)).action).toBe("dispatched");
     expect(flowWorker.dropQueuedFlowClips).toHaveBeenCalledWith("p1", expect.stringContaining("still image"));
+  });
+});
+
+describe("Google Flow only", () => {
+  const onlyChannel = { ...CHANNEL, flowHookClips: true, flowOnly: true };
+  const video = (scene: object = {}) => {
+    const p = project({ status: "ASSETS_READY", labsAppliedAt: new Date() });
+    p.scenes = p.scenes.map((s) => ({ ...s, ...scene })) as never;
+    return p;
+  };
+
+  it("has Script Lab queue a Flow clip for every scene, worker or not, and doesn't render", async () => {
+    db.channel.findMany.mockResolvedValue([onlyChannel]);
+    flowWorker.flowWorkerStatus.mockResolvedValue({ ready: false });
+    projectsQuery({ work: [video()] });
+    const result = await autopilotTick(NOW);
+    expect(flowPlan.planFlowScenes).toHaveBeenCalledWith("p1");
+    expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
+    expect(result.message).toContain("every scene is a Flow clip");
+  });
+
+  it("never renders with stills while clips are still queued, even with no worker", async () => {
+    db.channel.findMany.mockResolvedValue([onlyChannel]);
+    flowWorker.flowWorkerStatus.mockResolvedValue({ ready: false });
+    projectsQuery({ work: [video({ aiClipEngine: "FLOW", aiClipStatus: "QUEUED", aiClipUpdatedAt: new Date(NOW.getTime() - 86_400_000) })] });
+    expect((await autopilotTick(NOW)).action).not.toBe("dispatched");
+    expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
+  });
+
+  it("asks Flow again for a failed clip", async () => {
+    db.channel.findMany.mockResolvedValue([onlyChannel]);
+    projectsQuery({ work: [video({ aiClipEngine: "FLOW", aiClipStatus: "FAILED", aiClipPrompt: "shot" })] });
+    const result = await autopilotTick(NOW);
+    expect(wan2gp.queueSceneClip).toHaveBeenCalledWith(expect.any(String), "shot", "FLOW");
+    expect(result.message).toContain("asked Google Flow again");
+  });
+
+  it("renders once every scene is a Flow clip", async () => {
+    db.channel.findMany.mockResolvedValue([onlyChannel]);
+    projectsQuery({ work: [video({ aiClipEngine: "FLOW", aiClipStatus: null, videoClipUrl: "https://cdn/clip.mp4" })] });
+    expect((await autopilotTick(NOW)).action).toBe("dispatched");
+    expect(flowWorker.dropQueuedFlowClips).not.toHaveBeenCalled();
   });
 });
