@@ -314,7 +314,16 @@ async function nextTopic(channel: AutopilotChannel): Promise<{ topic: string; so
   return { topic, source: "Gemini" };
 }
 
+let officerError: string | null = null;
+
 export async function autopilotTick(now: Date = new Date()): Promise<TickResult> {
+  officerError = null;
+  const result = await tick(now);
+  // An officer failure is otherwise only in the server log: surface it in the run's own log.
+  return officerError ? { ...result, message: `${result.message} [${officerError}]` } : result;
+}
+
+async function tick(now: Date): Promise<TickResult> {
   const swept = await sweepStaleRenders(now);
   // Before publishing or planning, so a missed video takes the next slot instead of a new one.
   await rescheduleOverdue(now, MAX_AUTOPILOT_FAILURES);
@@ -329,6 +338,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
     }
   } catch (error) {
     console.error("Mastermind officer failed", error);
+    officerError = `Mastermind officer failed: ${errorMessage(error).slice(0, 300)}`;
   }
   await pollMuapiClips(undefined, now).catch((error) => console.error("Muapi poll failed", error));
 
