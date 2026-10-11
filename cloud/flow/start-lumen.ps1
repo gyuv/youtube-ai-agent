@@ -61,7 +61,7 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 # 3. Keep the PC awake while this window is open.
 try {
   Add-Type -Namespace Lumen -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags);' -ErrorAction Stop
-  [Lumen.Power]::SetThreadExecutionState(0x80000001) | Out-Null # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+  [Lumen.Power]::SetThreadExecutionState([uint32]2147483649) | Out-Null # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
   Say "The PC will stay awake while this window is open."
 } catch {
   Say "Couldn't keep the PC awake automatically; set Sleep to Never in Windows power settings." "Yellow"
