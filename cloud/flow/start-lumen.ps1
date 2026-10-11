@@ -46,14 +46,17 @@ function Setting($name, $prompt, $default = "", $pattern = ".") {
       $value = Read-Host "$prompt$(if ($default) { " [$default]" })"
       if (-not $value) { $value = $default }
       if (-not $value) { Write-Host "This one is needed." -ForegroundColor Yellow }
-      elseif ("$value".Trim().Trim('"') -notmatch $pattern) { Write-Host "That doesn't look right; try again." -ForegroundColor Yellow; $value = $null }
+      elseif ("$value".Trim().Trim('"') -notmatch $pattern) {
+        Write-Host "'$value' doesn't look right. Press Enter to use the value in [brackets], or type it again." -ForegroundColor Yellow
+        $value = $null
+      }
     }
     $value = "$value".Trim().Trim('"')
     [Environment]::SetEnvironmentVariable($name, $value, "User")
   }
   Set-Item -Path "Env:$name" -Value "$value".Trim()
 }
-Setting "LUMEN_URL" "Your studio address" "https://youtube-ai-agent-cloud.vercel.app" '^https://[^\s/]+(/\S*)?$'
+Setting "LUMEN_URL" "Your studio address" "https://youtube-ai-agent-cloud.vercel.app" '^https?://\S+$'
 Setting "FLOW_WORKER_SECRET" "FLOW_WORKER_SECRET (the same value as in Vercel)" "" '^\S{32,}$'
 Setting "FLOW_DAILY_CREDITS" "Google Flow credits you can spend per day" "1000" '^\d+$'
 Say "Settings loaded (to change them later: run with -Reset)."
