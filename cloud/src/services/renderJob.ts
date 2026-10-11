@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isFlowClip } from "./flowPlan";
 import { ProjectStatus } from "@/generated/prisma/enums";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
@@ -93,7 +94,7 @@ async function onStarted(e: Extract<RenderEvent, { event: "started" }>): Promise
 async function onRendered(e: Extract<RenderEvent, { event: "rendered" }>): Promise<RenderedResponse> {
   const project = await prisma.videoProject.findUnique({
     where: { id: e.projectId },
-    include: { channel: true, scenes: { select: { sceneIndex: true, durationSeconds: true } } },
+    include: { channel: true, scenes: { select: { sceneIndex: true, durationSeconds: true, videoClipUrl: true, aiClipEngine: true, aiClipStatus: true, locked: true } } },
   });
   if (!project) throw new PipelineError("NOT_FOUND", `Project ${e.projectId} not found.`);
 
@@ -107,6 +108,8 @@ async function onRendered(e: Extract<RenderEvent, { event: "rendered" }>): Promi
   if (done.count === 0 && !alreadyRecorded) throw new PipelineError("CONFLICT", "This run no longer owns the project's render.");
 
   if (!project.channel.autoPublish || project.youtubeVideoId) return { videoUrl, publish: null };
+  // A Flow-only channel never uploads a render with a scene that isn't a finished Google Flow clip.
+  if (project.channel.flowOnly && !project.scenes.every((s) => s.locked || isFlowClip(s))) return { videoUrl, publish: null };
   try {
     const accessToken = await getChannelAccessToken(project.channel);
     return { videoUrl, publish: { accessToken, metadata: buildYouTubeMetadata(project, project.scenes, project.channel) } };
