@@ -67,7 +67,7 @@ export function FlowSettings({
             </>
           ) : worker.online ? (
             <>
-              <span className="font-medium text-amber-200">Flow worker online, today&apos;s credits used.</span> Videos render with their stills until tomorrow.
+              <span className="font-medium text-amber-200">Flow worker online, today&apos;s credits used.</span> Queued clips are made when your Flow credits renew; a Flow-only channel waits for them instead of posting stills.
             </>
           ) : (
             <>

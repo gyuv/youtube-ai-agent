@@ -453,6 +453,15 @@ describe("Google Flow only", () => {
     expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
   });
 
+  it("plans the remaining scenes even while the hook's clip is already queued", async () => {
+    db.channel.findMany.mockResolvedValue([onlyChannel]);
+    const v = video();
+    v.scenes[0] = { ...v.scenes[0], aiClipEngine: "FLOW", aiClipStatus: "QUEUED", aiClipUpdatedAt: NOW } as never;
+    projectsQuery({ work: [v] });
+    expect((await autopilotTick(NOW)).action).toBe("planned");
+    expect(flowPlan.planFlowScenes).toHaveBeenCalledWith("p1");
+  });
+
   it("asks Flow again for a failed clip", async () => {
     db.channel.findMany.mockResolvedValue([onlyChannel]);
     projectsQuery({ work: [video({ aiClipEngine: "FLOW", aiClipStatus: "FAILED", aiClipPrompt: "shot" })] });

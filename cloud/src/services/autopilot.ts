@@ -199,12 +199,14 @@ function findWork(projects: WorkProject[], channels: Map<string, AutopilotChanne
   projects = projects.filter((p) => !p.autopilotRetryAt || p.autopilotRetryAt.getTime() <= now.getTime());
   for (const p of projects) {
     const channel = channels.get(p.channelId)!;
-    if (awaitingPinterest(p, now, flowReady, channel.flowOnly)) continue;
     if (channel.flowOnly && p.status === ProjectStatus.ASSETS_READY) {
-      // Every scene a Flow clip: plan the shots once, retry any that failed, and render only when all exist.
+      // Every scene a Flow clip: plan the shots (even while some are in flight), retry any that failed, and render only when all exist.
       if (p.scenes.some((s) => needsFlowShot(s))) return { kind: "flowscenes" as const, project: p, channel };
       const failed = p.scenes.filter((s) => s.aiClipEngine === "FLOW" && s.aiClipStatus === "FAILED" && !s.locked);
       if (failed.length) return { kind: "flowretry" as const, project: p, channel, sceneIds: failed.map((s) => s.id) };
+    }
+    if (awaitingPinterest(p, now, flowReady, channel.flowOnly)) continue;
+    if (channel.flowOnly && p.status === ProjectStatus.ASSETS_READY) {
       // Only real Flow clips count: a stand-in stock clip or image never reaches a Flow-only video.
       if (!p.scenes.every((s) => isFlowClip(s) || s.locked)) continue;
     }
