@@ -154,7 +154,7 @@ export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WA
       durationSeconds: scene.durationSeconds,
       imageUrl: scene.imageUrl,
       ...(engine === "FLOW"
-        ? { character: scene.project.channel.mascotName && scene.project.channel.mascotLook ? { name: scene.project.channel.mascotName, look: scene.project.channel.mascotLook } : null }
+        ? { character: scene.sceneIndex === 0 && scene.project.channel.mascotName && scene.project.channel.mascotLook ? { name: scene.project.channel.mascotName, look: scene.project.channel.mascotLook } : null }
         : {}),
       upload: await createSignedUpload(clipPath(scene.project.id, scene.id, now, engine), "video/mp4"),
     };

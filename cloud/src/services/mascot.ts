@@ -52,12 +52,13 @@ export const MascotInput = z.object({
   mascotName: z.string().trim().max(40).nullable(),
   mascotLook: z.string().trim().max(900).nullable(),
   flowHookClips: z.boolean(),
+  flowOnly: z.boolean().optional(),
 });
 
 export async function saveFlowSettings(channelId: string, input: z.input<typeof MascotInput>) {
   const data = MascotInput.parse(input);
   await prisma.channel.update({
     where: { id: channelId },
-    data: { mascotName: data.mascotName || null, mascotLook: data.mascotLook || null, flowHookClips: data.flowHookClips },
+    data: { mascotName: data.mascotName || null, mascotLook: data.mascotLook || null, flowHookClips: data.flowHookClips || Boolean(data.flowOnly), ...(data.flowOnly !== undefined ? { flowOnly: data.flowOnly } : {}) },
   });
 }

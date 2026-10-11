@@ -22,16 +22,17 @@ export function FlowSettings({
   worker,
 }: {
   channelId: string;
-  initial: { flowHookClips: boolean; mascotName: string | null; mascotLook: string | null };
+  initial: { flowHookClips: boolean; flowOnly?: boolean; mascotName: string | null; mascotLook: string | null };
   worker: FlowWorkerView;
 }) {
   const [on, setOn] = useState(initial.flowHookClips);
+  const [only, setOnly] = useState(Boolean(initial.flowOnly));
   const [name, setName] = useState(initial.mascotName ?? "");
   const [look, setLook] = useState(initial.mascotLook ?? "");
   const [why, setWhy] = useState<string | null>(null);
   const [designing, startDesign] = useTransition();
   const [saving, startSave] = useTransition();
-  const dirty = on !== initial.flowHookClips || name !== (initial.mascotName ?? "") || look !== (initial.mascotLook ?? "");
+  const dirty = on !== initial.flowHookClips || only !== Boolean(initial.flowOnly) || name !== (initial.mascotName ?? "") || look !== (initial.mascotLook ?? "");
 
   const design = () =>
     startDesign(async () => {
@@ -44,7 +45,7 @@ export function FlowSettings({
     });
   const save = () =>
     startSave(async () => {
-      const result = await saveFlowSettingsAction(channelId, { flowHookClips: on, mascotName: name.trim() || null, mascotLook: look.trim() || null });
+      const result = await saveFlowSettingsAction(channelId, { flowHookClips: on || only, flowOnly: only, mascotName: name.trim() || null, mascotLook: look.trim() || null });
       if (result.ok) toast.success("Saved. New Flow clips use these settings.");
       else toast.error(result.error);
     });
@@ -95,6 +96,27 @@ export function FlowSettings({
         </span>
         <span className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", on ? "bg-primary" : "bg-white/15")} aria-hidden>
           <span className={cn("absolute top-0.5 size-4 rounded-full bg-white transition-all", on ? "left-[18px]" : "left-0.5")} />
+        </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setOnly(!only)}
+        aria-pressed={only}
+        className={cn("flex items-center gap-3 rounded-2xl border p-3 text-left transition-colors", only ? "border-primary/40 bg-primary/[0.07]" : "bg-white/[0.02]")}
+      >
+        <span className={cn("grid size-9 shrink-0 place-items-center rounded-xl", only ? "bg-brand text-white" : "bg-white/5 text-muted-foreground")}>
+          <Sparkles className="size-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">Google Flow only: every scene is a cinematic Flow clip</span>
+          <span className="block text-xs text-muted-foreground">
+            No stills or stock footage in the final video. Script Lab writes one continuous shot list and a video renders only once every
+            scene is a Flow clip, so posting slows to what your daily Flow credits cover (one video at a time). Needs the Flow worker running.
+          </span>
+        </span>
+        <span className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", only ? "bg-primary" : "bg-white/15")} aria-hidden>
+          <span className={cn("absolute top-0.5 size-4 rounded-full bg-white transition-all", only ? "left-[18px]" : "left-0.5")} />
         </span>
       </button>
 

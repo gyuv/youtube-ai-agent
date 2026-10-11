@@ -109,7 +109,7 @@ export async function designMascotAction(channelId: string): Promise<ActionResul
   return toActionResult(() => designMascot(Id.parse(channelId)));
 }
 
-export async function saveFlowSettingsAction(channelId: string, input: { mascotName: string | null; mascotLook: string | null; flowHookClips: boolean }): Promise<ActionResult> {
+export async function saveFlowSettingsAction(channelId: string, input: { mascotName: string | null; mascotLook: string | null; flowHookClips: boolean; flowOnly?: boolean }): Promise<ActionResult> {
   await requireOperator();
   const result = await toActionResult(async () => {
     await saveFlowSettings(Id.parse(channelId), input);

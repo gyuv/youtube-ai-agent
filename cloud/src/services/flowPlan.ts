@@ -105,3 +105,80 @@ export async function planFlowHook(projectId: string, client?: GeminiClient): Pr
   }
   return { ...plan, sceneId: hook.id };
 }
+
+/**
+ * Flow-only channels: every scene is a Flow clip. Script Lab writes all the shots in one pass so
+ * they read as one continuous film (same characters, palette and light), and every one is queued:
+ * nothing is declined, because these channels never show a still.
+ */
+const ShotsSchema = z.object({
+  shots: z
+    .array(
+      z.object({
+        sceneIndex: z.number().int().min(0),
+        prompt: z
+          .string()
+          .min(30)
+          .max(900)
+          .describe("The Flow video prompt in English: one continuous cinematic shot under 8 seconds, one camera move, the action the narration describes, light and mood. No on-screen text, no cuts."),
+      }),
+    )
+    .min(1),
+});
+const SHOTS_JSON_SCHEMA = sanitizeSchema(z.toJSONSchema(ShotsSchema));
+
+export function buildFlowScenesPrompt(input: {
+  niche: string;
+  title: string;
+  format: "SHORT" | "LONG_FORM";
+  scenes: Array<{ sceneIndex: number; narration: string; imagePrompt: string }>;
+  mascot?: { name: string; look: string } | null;
+}) {
+  const system = [
+    `You are Script Lab, directing a fully AI-generated cinematic video for a YouTube channel about ${input.niche}. Every scene below becomes one Google Flow video clip.`,
+    "Write one shot per scene so the clips cut together as one film: the same characters with the same look in every shot, one consistent art style, colour palette and lighting, and camera moves that flow from shot to shot. Cinematic: depth of field, warm light, gentle dolly, crane or orbit moves, expressive character animation.",
+    "Each shot is one continuous take under 8 seconds showing exactly what its narration describes. Never put words, letters or logos on screen.",
+    input.mascot
+      ? `The first scene stars the channel's host, ${input.mascot.name} (${input.mascot.look}), attached as a Flow character: refer to them by name there. The other scenes start from their own image, so describe characters as in the image prompt.`
+      : "Each clip starts from its scene's image: describe motion of what that image shows.",
+  ].join("\n");
+  const prompt = [
+    `Video: ${input.title} (${input.format === "SHORT" ? "vertical 9:16 Short" : "16:9 long-form"})`,
+    ...input.scenes.map((s) => `Scene index ${s.sceneIndex}: narration "${s.narration}" | image: ${s.imagePrompt || "(none)"}`),
+    "Return one shot for each scene index listed.",
+  ].join("\n");
+  return { system, prompt };
+}
+
+export function parseFlowShots(text: string | undefined) {
+  const parsed = ShotsSchema.safeParse(parseJsonText(text));
+  if (!parsed.success) throw new Error(`Flow shots did not match the schema: ${z.prettifyError(parsed.error)}`);
+  return parsed.data.shots;
+}
+
+/** Plan and queue a Flow clip for every scene of a Flow-only video that doesn't have one yet. */
+export async function planFlowScenes(projectId: string, client?: GeminiClient): Promise<{ queued: number }> {
+  const project = await prisma.videoProject.findUnique({
+    where: { id: projectId },
+    include: { channel: { select: { niche: true, mascotName: true, mascotLook: true } }, scenes: { orderBy: { sceneIndex: "asc" } } },
+  });
+  if (!project) throw new PipelineError("NOT_FOUND", `Project ${projectId} not found.`);
+  const todo = project.scenes.filter((s) => needsFlowPlan(s));
+  if (!todo.length) return { queued: 0 };
+
+  const { system, prompt } = buildFlowScenesPrompt({
+    niche: project.channel.niche,
+    title: project.title ?? project.topic,
+    format: project.format,
+    scenes: todo.map((s) => ({ sceneIndex: s.sceneIndex, narration: s.narrationText, imagePrompt: s.visualPrompt ?? "" })),
+    mascot: project.channel.mascotName && project.channel.mascotLook ? { name: project.channel.mascotName, look: project.channel.mascotLook } : null,
+  });
+  const { value: shots } = await generateGeminiJson({ task: "Flow shot list", systemInstruction: system, prompt, responseJsonSchema: SHOTS_JSON_SCHEMA, parse: parseFlowShots, client });
+  const byIndex = new Map(shots.map((s) => [s.sceneIndex, s.prompt]));
+  let queued = 0;
+  for (const scene of todo) {
+    await queueSceneClip(scene.id, byIndex.get(scene.sceneIndex) ?? scene.visualPrompt ?? scene.narrationText, FLOW_ENGINE);
+    queued++;
+  }
+  return { queued };
+}

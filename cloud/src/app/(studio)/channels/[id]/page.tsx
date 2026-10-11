@@ -198,7 +198,7 @@ export default async function ChannelPage({
         <CardContent>
           <FlowSettings
             channelId={channel.id}
-            initial={{ flowHookClips: channel.flowHookClips, mascotName: channel.mascotName, mascotLook: channel.mascotLook }}
+            initial={{ flowHookClips: channel.flowHookClips, flowOnly: channel.flowOnly, mascotName: channel.mascotName, mascotLook: channel.mascotLook }}
             worker={{ online: flowWorker.online, ready: flowWorker.ready, creditsLeft: flowWorker.creditsLeft, seenAgo: flowWorker.seenAt ? timeAgo(flowWorker.seenAt, now) : null }}
           />
         </CardContent>
