@@ -9,7 +9,17 @@
 #
 # Close this window (or press Ctrl+C) to stop. Run it again to start.
 
-$ErrorActionPreference = "Stop"
+# npm and node write warnings to stderr; in Windows PowerShell 5 "Stop" would turn those into crashes.
+$ErrorActionPreference = "Continue"
+$Log = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "start-lumen.log"
+try { Start-Transcript -Path $Log -Append | Out-Null } catch {}
+# Never close silently: show what went wrong and wait, so the window can be read.
+trap {
+  Write-Host "`nSomething went wrong: $($_.Exception.Message)" -ForegroundColor Red
+  Write-Host "Details are in $Log. Send that file (or this text) to get it fixed." -ForegroundColor Yellow
+  Read-Host "Press Enter to close"
+  exit 1
+}
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Worker = Join-Path $Here "flow-worker.mjs"
 $WorkerUrl = "https://raw.githubusercontent.com/gyuv/youtube-ai-agent/claude/epic-cannon-4u9o4s/cloud/flow/flow-worker.mjs"
@@ -27,11 +37,15 @@ if ($args -contains "-Reset") {
 function Setting($name, $prompt, $default = "") {
   $value = [Environment]::GetEnvironmentVariable($name, "User")
   if (-not $value) {
-    $value = Read-Host "$prompt$(if ($default) { " [$default]" })"
-    if (-not $value) { $value = $default }
-    [Environment]::SetEnvironmentVariable($name, $value.Trim(), "User")
+    while (-not $value) {
+      $value = Read-Host "$prompt$(if ($default) { " [$default]" })"
+      if (-not $value) { $value = $default }
+      if (-not $value) { Write-Host "This one is needed." -ForegroundColor Yellow }
+    }
+    $value = "$value".Trim().Trim('"')
+    [Environment]::SetEnvironmentVariable($name, $value, "User")
   }
-  Set-Item -Path "Env:$name" -Value $value.Trim()
+  Set-Item -Path "Env:$name" -Value "$value".Trim()
 }
 Setting "LUMEN_URL" "Your studio address" "https://youtube-ai-agent-cloud.vercel.app"
 Setting "FLOW_WORKER_SECRET" "FLOW_WORKER_SECRET (the same value as in Vercel)"
@@ -45,18 +59,22 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 }
 
 # 3. Keep the PC awake while this window is open.
-Add-Type -Namespace Lumen -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags);'
-[Lumen.Power]::SetThreadExecutionState(0x80000001) | Out-Null # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
-Say "The PC will stay awake while this window is open."
+try {
+  Add-Type -Namespace Lumen -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags);' -ErrorAction Stop
+  [Lumen.Power]::SetThreadExecutionState(0x80000001) | Out-Null # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+  Say "The PC will stay awake while this window is open."
+} catch {
+  Say "Couldn't keep the PC awake automatically; set Sleep to Never in Windows power settings." "Yellow"
+}
 
 # 4. flow-mcp: install once if missing, then make sure its studio is running.
 function FlowMcpUp {
-  try { (Invoke-RestMethod "http://127.0.0.1:8787/api/health" -TimeoutSec 3).name -eq "flow-mcp" } catch { $false }
+  try { (Invoke-RestMethod "http://127.0.0.1:8787/api/health" -TimeoutSec 3 -ErrorAction Stop).name -eq "flow-mcp" } catch { $false }
 }
 if (-not (Test-Path (Join-Path $FlowMcp "package.json"))) {
   Say "Installing flow-mcp (first run only)..."
   $zip = Join-Path $HOME "flow-mcp.zip"
-  Invoke-WebRequest "https://github.com/GTAI-1/flow-mcp/archive/refs/heads/main.zip" -OutFile $zip
+  Invoke-WebRequest "https://github.com/GTAI-1/flow-mcp/archive/refs/heads/main.zip" -OutFile $zip -UseBasicParsing -ErrorAction Stop
   Expand-Archive $zip -DestinationPath $HOME -Force
   if (Test-Path (Join-Path $HOME "flow-mcp-main")) { Move-Item (Join-Path $HOME "flow-mcp-main") $FlowMcp -Force }
   Push-Location $FlowMcp; npm install; npm run build
@@ -77,7 +95,7 @@ StartFlowMcp
 $restarts = 0
 while ($true) {
   try {
-    Invoke-WebRequest $WorkerUrl -OutFile "$Worker.new" -TimeoutSec 30
+    Invoke-WebRequest $WorkerUrl -OutFile "$Worker.new" -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
     if ((Get-Content "$Worker.new" -Raw) -match "Lumen") { Move-Item "$Worker.new" $Worker -Force; Say "Worker is up to date." }
   } catch {
     Say "Couldn't download the latest worker ($($_.Exception.Message)); using the copy on disk." "Yellow"
