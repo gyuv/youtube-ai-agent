@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { z } from "zod";
 import type { Channel } from "@/generated/prisma/client";
 import { PipelineError, errorMessage } from "@/lib/errors";
@@ -77,6 +78,18 @@ export async function generateBrandAsset(channelId: string, kind: BrandKind, cli
   return prisma.brandAsset.create({ data: { channelId, kind, prompt: brief.imagePrompt, imageUrl, text: brief.text } });
 }
 
+/**
+ * YouTube rejects banners that aren't JPEG/PNG/GIF/BMP, are under 2048x1152 or over 6 MB. The
+ * image service can return WebP or a smaller size, so always re-encode to a 2560x1440 JPEG.
+ */
+export async function toYoutubeBanner(input: Buffer): Promise<Buffer> {
+  for (const quality of [90, 80, 70]) {
+    const out = await sharp(input).rotate().resize(2560, 1440, { fit: "cover" }).flatten({ background: "#000" }).jpeg({ quality, mozjpeg: true }).toBuffer();
+    if (out.length <= 6 * 1024 * 1024) return out;
+  }
+  throw new PipelineError("CONFLICT", "The banner is still over YouTube's 6 MB limit after compressing it.");
+}
+
 export function canSetBanner(channel: Pick<Channel, "oauthScopes" | "oauthRefreshTokenEnc">): boolean {
   return Boolean(channel.oauthRefreshTokenEnc) && channel.oauthScopes.includes(MANAGE_SCOPE);
 }
@@ -101,13 +114,19 @@ export async function applyBanner(assetId: string, now: Date = new Date()) {
   }
   const image = await fetch(asset.imageUrl, { signal: AbortSignal.timeout(30_000) });
   if (!image.ok) throw new PipelineError("PROVIDER", `Could not read the banner image (${image.status}).`);
-  const bytes = Buffer.from(await image.arrayBuffer());
+  let bytes: Buffer;
+  try {
+    bytes = await toYoutubeBanner(Buffer.from(await image.arrayBuffer()));
+  } catch (error) {
+    if (error instanceof PipelineError) throw error;
+    throw new PipelineError("PROVIDER", `Could not prepare the banner image: ${errorMessage(error)}`, { cause: error });
+  }
   const token = await getChannelAccessToken(asset.channel);
   const auth = { Authorization: `Bearer ${token}` };
 
   const uploaded = await youtube(
     "https://www.googleapis.com/upload/youtube/v3/channelBanners/insert?uploadType=media",
-    { method: "POST", headers: { ...auth, "Content-Type": image.headers.get("content-type") ?? "image/jpeg" }, body: bytes },
+    { method: "POST", headers: { ...auth, "Content-Type": "image/jpeg" }, body: new Uint8Array(bytes) },
     "upload the banner",
   );
   const bannerUrl = uploaded.url as string | undefined;

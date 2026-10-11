@@ -3,6 +3,7 @@ import type { Channel, Prisma } from "@/generated/prisma/client";
 import { ProjectStatus } from "@/generated/prisma/enums";
 import { errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
+import { autoBrand } from "./brandAutopilot";
 import { rankPerformance, type PerformanceRow } from "./analytics";
 import { generateGeminiJson, parseJsonText, sanitizeSchema, type GeminiClient } from "./gemini";
 import { GOAL_LABEL } from "./growthGoal";
@@ -151,6 +152,8 @@ export interface MastermindResult {
   skipped: string[];
   backlogAdded: number;
   requests: number;
+  /** Branding the autopilot changed itself this run. */
+  branding?: string[];
 }
 
 export async function runMastermind(channel: Channel, now: Date = new Date(), client?: GeminiClient): Promise<MastermindResult> {
@@ -218,7 +221,11 @@ export async function runMastermind(channel: Channel, now: Date = new Date(), cl
 
   // The strategy goes in first, so rescripts below already follow it.
   await prisma.channel.update({ where: { id: channel.id }, data: { mastermindNotes: plan.strategy.trim() } });
-  const result = await applyPlan(channel, plan, candidates, now);
+  // Under autopilot, branding the mastermind wants (or that is simply due) is done, not asked for.
+  const brand = await autoBrand(channel, { banner: plan.requests.some((r) => r.kind === "banner"), avatar: plan.requests.some((r) => r.kind === "avatar") }, now);
+  const requests = plan.requests.filter((r) => !brand.handled.has(r.kind));
+  if (brand.avatarRequest) requests.unshift({ kind: "avatar", ...brand.avatarRequest });
+  const result = { ...(await applyPlan(channel, { ...plan, requests: requests.slice(0, 3) }, candidates, now)), branding: brand.done };
   await prisma.labReport.create({
     data: {
       channelId: channel.id,
@@ -296,6 +303,7 @@ function planMarkdown(plan: MastermindPlan, result: MastermindResult): string {
     `## Diagnosis\n${plan.diagnosis}`,
     `## Strategy\n${plan.strategy}`,
     `## Changes made\n${result.applied.length ? result.applied.map((a) => `- ${a}`).join("\n") : "- None this run."}`,
+    result.branding?.length ? `## Branding\n${result.branding.map((b) => `- ${b}`).join("\n")}` : "",
     result.skipped.length ? `## Held back\n${result.skipped.map((s) => `- ${s}`).join("\n")}` : "",
     plan.backlog.length ? `## New topics\n${plan.backlog.map((t) => `- ${t}`).join("\n")}` : "",
     plan.requests.length ? `## Asked of you\n${plan.requests.map((r) => `- **${r.title}**: ${r.body}`).join("\n")}` : "",
