@@ -46,6 +46,9 @@ describe("publishRenderedProject", () => {
     await expect(publishRenderedProject("p1")).rejects.toThrow(/Only rendered/);
     db.videoProject.findUnique.mockResolvedValue({ ...PROJECT, youtubeVideoId: "x" });
     await expect(publishRenderedProject("p1")).rejects.toThrow(/already on YouTube/);
+    const stock = { sceneIndex: 0, durationSeconds: 5, videoClipUrl: "https://pexels/c.mp4", aiClipEngine: null, aiClipStatus: null, locked: false };
+    db.videoProject.findUnique.mockResolvedValue({ ...PROJECT, channel: { ...PROJECT.channel, flowOnly: true }, scenes: [stock] });
+    await expect(publishRenderedProject("p1")).rejects.toThrow(/Google Flow video only/);
   });
 
   it("won't upload twice while a publish is in progress", async () => {
