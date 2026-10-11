@@ -50,7 +50,7 @@ export const PLANNING_PAUSE_MS = 12 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const VERIFY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type TickAction = "mastermind" | "packaged" | "reviewed" | "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "waiting" | "error" | "idle";
+export type TickAction = "repaired" | "mastermind" | "packaged" | "reviewed" | "analyzed" | "published" | "dispatched" | "filled" | "scripted" | "verified" | "planned" | "waiting" | "error" | "idle";
 
 export interface TickResult {
   action: TickAction;
@@ -322,7 +322,10 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
   try {
     const officer = await runOfficer(MAX_AUTOPILOT_FAILURES, now);
     if (officer.resolved.length || officer.open.length) {
-      await log(officer.open.length ? "error" : "info", "officer", `Mastermind officer: ${[...officer.resolved, ...officer.open.map((o) => `needs you: ${o}`)].join("; ")}.`.slice(0, 1500));
+      const message = `Mastermind officer: ${[...officer.resolved, ...officer.open.map((o) => `needs you: ${o}`)].join("; ")}.`.slice(0, 1500);
+      await log(officer.open.length ? "error" : "info", "officer", message);
+      // Reported as its own step, so the run's log shows what was repaired.
+      if (officer.resolved.length) return { action: "repaired", message, more: true, swept };
     }
   } catch (error) {
     console.error("Mastermind officer failed", error);

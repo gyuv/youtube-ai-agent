@@ -38,12 +38,16 @@ async function downloadRendered(url: string): Promise<Uint8Array> {
 export async function publishRenderedProject(projectId: string, now: Date = new Date()): Promise<{ youtubeVideoId: string; locked: boolean }> {
   const project = await prisma.videoProject.findUnique({
     where: { id: projectId },
-    include: { channel: true, scenes: { select: { sceneIndex: true, durationSeconds: true } } },
+    include: { channel: true, scenes: { select: { sceneIndex: true, durationSeconds: true, videoClipUrl: true, aiClipEngine: true, aiClipStatus: true, locked: true } } },
   });
   if (!project) throw new PipelineError("NOT_FOUND", `Project ${projectId} not found.`);
   if (project.youtubeVideoId) throw new PipelineError("CONFLICT", "This video is already on YouTube.");
   if (project.status !== ProjectStatus.RENDERED || !project.renderedVideoUrl) {
     throw new PipelineError("CONFLICT", `Only rendered videos can be published (this one is ${project.status}).`);
+  }
+
+  if (project.channel.flowOnly && !project.scenes.every((s) => s.locked || (s.aiClipEngine === "FLOW" && !s.aiClipStatus && s.videoClipUrl))) {
+    throw new PipelineError("CONFLICT", `${project.channel.name} posts Google Flow video only, and this render has scenes that aren't Flow clips.`);
   }
 
   // Claim the publish so a double click or a concurrent autopilot step can't upload twice.
@@ -95,6 +99,8 @@ export async function findVideoToAutoPublish(now: Date = new Date()) {
       youtubeVideoId: null,
       renderedVideoUrl: { not: null },
       channel: { autoPublish: true, isActive: true, oauthRefreshTokenEnc: { not: null } },
+      // A Flow-only channel never posts a render with a scene that isn't a finished Flow clip.
+      NOT: { channel: { flowOnly: true }, scenes: { some: { locked: false, OR: [{ aiClipEngine: null }, { aiClipEngine: { not: "FLOW" } }, { videoClipUrl: null }, { aiClipStatus: { not: null } }] } } },
       OR: [{ publishStartedAt: null }, { publishStartedAt: { lt: new Date(now.getTime() - AUTO_PUBLISH_RETRY_MS) } }],
     },
     orderBy: [{ scheduledFor: { sort: "asc", nulls: "last" } }, { renderFinishedAt: "asc" }],
