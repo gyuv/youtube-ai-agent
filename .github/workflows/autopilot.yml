@@ -1,6 +1,6 @@
 name: Autopilot
 
-# Every 3 hours, and on demand from the studio's "Run now" button, keep asking the app for the
+# Every hour, and on demand from the studio's "Run now" button, keep asking the app for the
 # next autopilot step until it reports there is nothing left to do. Each call is one small step
 # (plan, script, fill a scene, dispatch a render); see cloud/src/services/autopilot.ts.
 #
@@ -12,7 +12,7 @@ name: Autopilot
 
 on:
   schedule:
-    - cron: "23 */3 * * *"
+    - cron: "23 * * * *"
   repository_dispatch:
     types: [autopilot]
   workflow_dispatch:
