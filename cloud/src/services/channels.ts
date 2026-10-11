@@ -26,7 +26,7 @@ export const ChannelInputSchema = z
   niche: z.string().trim().min(2, "Describe the channel's niche").max(200),
   targetAudience: optionalText(300),
   language: z.string().trim().regex(/^[a-z]{2,3}(-[A-Z]{2})?$/, "Use a language code such as en, hi or en-IN"),
-  defaultVoice: z.string().trim().refine(isValidVoice, "Use an edge-tts voice such as en-US-AriaNeural, or elevenlabs:<voice ID>"),
+  defaultVoice: z.string().trim().refine(isValidVoice, "Use an edge-tts voice such as en-US-AriaNeural, a Gemini voice such as gemini:Charon, or elevenlabs:<voice ID>"),
   defaultFormat: z.enum(VideoFormat),
   defaultPrivacy: z.enum(PrivacyStatus),
   defaultScriptPrompt: optionalText(4000),

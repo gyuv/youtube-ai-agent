@@ -3,7 +3,10 @@ CREATE TYPE "GrowthGoal" AS ENUM ('SUBSCRIBERS', 'VIEWS', 'BALANCED');
 
 -- AlterTable
 ALTER TABLE "Channel" ADD COLUMN     "channelStatsAt" TIMESTAMP(3),
+ADD COLUMN     "flowHookClips" BOOLEAN NOT NULL DEFAULT false,
 ADD COLUMN     "growthGoal" "GrowthGoal" NOT NULL DEFAULT 'BALANCED',
+ADD COLUMN     "mascotLook" TEXT,
+ADD COLUMN     "mascotName" TEXT,
 ADD COLUMN     "mastermind" BOOLEAN NOT NULL DEFAULT true,
 ADD COLUMN     "mastermindAt" TIMESTAMP(3),
 ADD COLUMN     "mastermindNotes" TEXT,

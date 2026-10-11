@@ -120,6 +120,12 @@ model Channel {
   mastermind       Boolean    @default(true)
   mastermindAt     DateTime?
   mastermindNotes  String?    @db.Text // the current strategy, fed into topics and scripts
+  // Animate each autopilot video's hook scene with Google Flow (cloud/flow/ worker on the operator's PC),
+  // after Script Lab plans the shot and judges it worth the credits.
+  flowHookClips    Boolean    @default(false)
+  // The channel's recurring host: created once as a Google Flow character and attached to every Flow clip.
+  mascotName       String?
+  mascotLook       String?    @db.Text
 
   // Channel-level YouTube numbers for the monetization tracker.
   subscriberCount  Int?

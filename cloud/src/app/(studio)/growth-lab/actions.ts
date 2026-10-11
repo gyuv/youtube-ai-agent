@@ -8,6 +8,7 @@ import { PipelineError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { applyBanner, generateBrandAsset, markBrandAssetUsed } from "@/services/branding";
 import { resolveRequest, runMastermind } from "@/services/mastermind";
+import { designMascot, saveFlowSettings } from "@/services/mascot";
 import { refreshMonetizationStats } from "@/services/monetization";
 
 const Id = z.string().min(1);
@@ -100,5 +101,20 @@ export async function resolveRequestAction(requestId: string, status: string): P
     return null;
   });
   refresh();
+  return result;
+}
+
+export async function designMascotAction(channelId: string): Promise<ActionResult<{ name: string; look: string; why: string }>> {
+  await requireOperator();
+  return toActionResult(() => designMascot(Id.parse(channelId)));
+}
+
+export async function saveFlowSettingsAction(channelId: string, input: { mascotName: string | null; mascotLook: string | null; flowHookClips: boolean }): Promise<ActionResult> {
+  await requireOperator();
+  const result = await toActionResult(async () => {
+    await saveFlowSettings(Id.parse(channelId), input);
+    return null;
+  });
+  refresh(channelId);
   return result;
 }

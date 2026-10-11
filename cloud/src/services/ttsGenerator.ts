@@ -1,8 +1,9 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import type { Readable } from "node:stream";
 import { PipelineError, errorMessage } from "@/lib/errors";
-import { DEFAULT_VOICE, ELEVENLABS_PREFIX, elevenLabsVoiceId, isValidVoice } from "@/lib/voices";
+import { DEFAULT_VOICE, ELEVENLABS_PREFIX, GEMINI_PREFIX, elevenLabsVoiceId, geminiVoiceName, isValidVoice } from "@/lib/voices";
 import { synthesizeElevenLabs } from "./elevenLabsTts";
+import { synthesizeGemini } from "./geminiTts";
 
 /**
  * Free neural voiceover through Microsoft Edge's Read Aloud service (the engine behind the
@@ -21,7 +22,7 @@ export interface WordTiming {
 
 export interface SpeechResult {
   audio: Buffer;
-  contentType: "audio/mpeg";
+  contentType: "audio/mpeg" | "audio/wav";
   durationSeconds: number;
   wordTimings: WordTiming[];
   voice: string;
@@ -134,6 +135,11 @@ export async function synthesizeSpeech(
     const voiceId = elevenLabsVoiceId(voice);
     if (!voiceId) throw new PipelineError("CONFLICT", `"${voice}" is not a valid ElevenLabs voice (use elevenlabs:<voice ID>).`);
     return synthesizeElevenLabs(narration, voiceId, voice, options.timeoutMs);
+  }
+  if (voice.startsWith(GEMINI_PREFIX)) {
+    const name = geminiVoiceName(voice);
+    if (!name) throw new PipelineError("CONFLICT", `"${voice}" is not a Gemini voice (use gemini:<Name>, e.g. gemini:Charon).`);
+    return synthesizeGemini(narration, name, voice, options.timeoutMs);
   }
   if (!isValidVoice(voice)) throw new PipelineError("CONFLICT", `"${voice}" is not a valid edge-tts voice name.`);
   if (!RATE_PATTERN.test(rate)) throw new PipelineError("CONFLICT", `Rate must look like "+10%", got "${rate}".`);

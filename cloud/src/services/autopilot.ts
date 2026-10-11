@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { analyzeChannel, findChannelToAnalyze } from "./analytics";
 import { findChannelForGrowthReview, packageProject, runGrowthReview } from "./labsAutomation";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets, sceneNeedsFill } from "./pipeline";
+import { needsFlowPlan, planFlowHook } from "./flowPlan";
 import { growthBrief } from "./growthGoal";
 import { findChannelForMastermind, runMastermind } from "./mastermind";
 import { pollMuapiClips } from "./muapi";
@@ -80,6 +81,7 @@ type AutopilotChannel = Pick<
   | "growthGoal"
   | "mastermind"
   | "mastermindNotes"
+  | "flowHookClips"
 >;
 
 type WorkProject = Pick<VideoProject, "id" | "channelId" | "status" | "topic" | "title" | "autopilotFailures" | "scheduledFor"> & {
@@ -96,15 +98,18 @@ function autopilotVisualSource(source: VisualSource): "POLLINATIONS" | "PEXELS" 
   return source === VisualSource.PEXELS || source === VisualSource.PINTEREST ? source : "POLLINATIONS";
 }
 
-/** A Pinterest search is still in flight (and recent), so the scene's visual is about to change. */
+/**
+ * How long a render waits for the Google Flow worker (on the operator's computer, which may be
+ * asleep) before going out with the hook's still image instead.
+ */
+export const FLOW_WAIT_MS = 4 * 60 * 60 * 1000;
+
+/** A Pinterest search or Flow clip is still in flight (and recent), so a scene's visual is about to change. */
 function awaitingPinterest(p: WorkProject, now: Date): boolean {
-  const since = now.getTime() - PINTEREST_WAIT_MS;
-  return p.scenes.some(
-    (s) =>
-      s.aiClipEngine === "PINTEREST" &&
-      (s.aiClipStatus === "QUEUED" || s.aiClipStatus === "RUNNING") &&
-      (s.aiClipUpdatedAt?.getTime() ?? 0) > since,
-  );
+  return p.scenes.some((s) => {
+    const wait = s.aiClipEngine === "PINTEREST" ? PINTEREST_WAIT_MS : s.aiClipEngine === "FLOW" ? FLOW_WAIT_MS : 0;
+    return wait > 0 && (s.aiClipStatus === "QUEUED" || s.aiClipStatus === "RUNNING") && (s.aiClipUpdatedAt?.getTime() ?? 0) > now.getTime() - wait;
+  });
 }
 
 async function log(level: "info" | "error", action: string, message: string, ids: { channelId?: string; projectId?: string } = {}) {
@@ -178,6 +183,10 @@ function findWork(projects: WorkProject[], channels: Map<string, AutopilotChanne
   for (const p of projects) {
     const channel = channels.get(p.channelId)!;
     if (awaitingPinterest(p, now)) continue;
+    // Google Flow on: Script Lab plans the hook clip once, before the video renders.
+    if (p.status === ProjectStatus.ASSETS_READY && channel.flowHookClips && needsFlowPlan(p.scenes[0] as Parameters<typeof needsFlowPlan>[0])) {
+      return { kind: "flowplan" as const, project: p, channel };
+    }
     // Creator Labs package the video (title, SEO, chapters) once, before it renders.
     if (p.status === ProjectStatus.ASSETS_READY && channel.autoLabs && !p.labsAppliedAt) return { kind: "package" as const, project: p, channel };
     if (p.status === ProjectStatus.ASSETS_READY && !channel.autopilotReview) return { kind: "dispatch" as const, project: p, channel };
@@ -397,6 +406,14 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
         await log(failed.length && !applied.length ? "error" : "info", "packaged", message, ids);
         return { action: "packaged", message, more: true, swept, ...ids };
       }
+      if (work.kind === "flowplan") {
+        const plan = await planFlowHook(project.id);
+        const message = plan.animate
+          ? `${label(project)}: Script Lab planned a Google Flow clip for the hook and queued it for your Flow worker (${plan.reason}).`
+          : `${label(project)}: Script Lab kept the hook's still image, saving Flow credits (${plan.reason}).`;
+        await log("info", "flowplan", message, ids);
+        return { action: "planned", message, more: true, swept, ...ids };
+      }
       if (work.kind === "dispatch") {
         const retry = project.status === ProjectStatus.FAILED;
         await dispatchCloudRender(project.id);
@@ -421,7 +438,7 @@ export async function autopilotTick(now: Date = new Date()): Promise<TickResult>
       await log("info", "scripted", message, ids);
       return { action: "scripted", message, more: true, swept, ...ids };
     } catch (error) {
-      const step = work.kind === "dispatch" ? "Render dispatch" : work.kind === "fill" ? "Asset generation" : work.kind === "package" ? "Creator Labs" : "Script writing";
+      const step = work.kind === "flowplan" ? "Flow clip plan" : work.kind === "dispatch" ? "Render dispatch" : work.kind === "fill" ? "Asset generation" : work.kind === "package" ? "Creator Labs" : "Script writing";
       if (isProviderError(error)) {
         const message = await postpone(project, step, error, now);
         return { action: "waiting", message, more: true, swept, ...ids };

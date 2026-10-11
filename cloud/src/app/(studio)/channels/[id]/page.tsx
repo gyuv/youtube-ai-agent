@@ -1,5 +1,6 @@
-import { BadgeDollarSign, Brain, CheckCircle2, Inbox, Link2, Palette, Target, Unlink, Youtube } from "lucide-react";
+import { BadgeDollarSign, Brain, Clapperboard, CheckCircle2, Inbox, Link2, Palette, Target, Unlink, Youtube } from "lucide-react";
 import { BrandStudio } from "@/components/growth/brand-studio";
+import { FlowSettings } from "@/components/growth/flow-settings";
 import { GoalPicker } from "@/components/growth/goal-picker";
 import { MonetizationTracker } from "@/components/growth/monetization-tracker";
 import { RequestsInbox } from "@/components/growth/requests-inbox";
@@ -180,6 +181,20 @@ export default async function ChannelPage({
         </CardHeader>
         <CardContent>
           <RequestsInbox requests={requests.map((r) => ({ id: r.id, kind: r.kind, title: r.title, body: r.body, channelName: r.channel.name, ago: timeAgo(r.createdAt, now) }))} />
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Clapperboard className="size-4 text-brand-1" /> Google Flow
+            </CardTitle>
+            <CardDescription className="mt-1.5">AI video for the moment that matters most, the hook, starring the channel&apos;s own host.</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <FlowSettings channelId={channel.id} initial={{ flowHookClips: channel.flowHookClips, mascotName: channel.mascotName, mascotLook: channel.mascotLook }} />
         </CardContent>
       </Card>
 

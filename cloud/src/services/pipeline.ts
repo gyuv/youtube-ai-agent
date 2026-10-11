@@ -174,7 +174,7 @@ export async function regenerateSceneAudio(sceneId: string, options: { narration
   const voice = project.voice ?? project.channel.defaultVoice ?? DEFAULT_VOICE;
 
   const speech = await synthesizeSpeech(text, { voice });
-  const path = `projects/${project.id}/scenes/${scene.id}/voice-${shortHash(text, speech.voice)}.mp3`;
+  const path = `projects/${project.id}/scenes/${scene.id}/voice-${shortHash(text, speech.voice)}.${speech.contentType === "audio/wav" ? "wav" : "mp3"}`;
   const voiceAudioUrl = await uploadObject(path, speech.audio, speech.contentType);
 
   const updated = await prisma.scene.update({

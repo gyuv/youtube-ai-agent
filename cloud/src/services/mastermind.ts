@@ -78,7 +78,8 @@ export interface Candidate {
 }
 
 export function buildMastermindPrompt(input: {
-  channel: Pick<Channel, "name" | "niche" | "targetAudience" | "language" | "growthGoal" | "mastermindNotes" | "performanceNotes">;
+  channel: Pick<Channel, "name" | "niche" | "targetAudience" | "language" | "growthGoal" | "mastermindNotes" | "performanceNotes"> &
+    Partial<Pick<Channel, "mascotName" | "mascotLook">>;
   progress: string;
   ranking: PerformanceRow[];
   candidates: Candidate[];
@@ -90,10 +91,15 @@ export function buildMastermindPrompt(input: {
     `You are the growth mastermind of the faceless YouTube channel "${channel.name}" (niche: ${channel.niche}${channel.targetAudience ? `; audience: ${channel.targetAudience}` : ""}).`,
     "Your single objective is to get this channel into the YouTube Partner Program as fast as possible and then keep growing it. You have full authority over every video that is not yet published: you may retitle it, rewrite its script, or throw its topic away for a stronger one.",
     `The operator chose the growth goal: ${GOAL_LABEL[channel.growthGoal]}. Weight your choices toward it.`,
+    channel.mascotName && channel.mascotLook
+      ? `The channel has a recurring host, ${channel.mascotName} (${channel.mascotLook}), who opens videos in animated hook clips. Build the strategy around them: a named series, catchphrases, ${channel.mascotName} as the face viewers subscribe for.`
+      : "",
     "Be decisive and aggressive about what actually moves views and subscribers: hooks in the first two seconds, curiosity-driven but honest titles, strong thumbnail text, series that bring viewers back, topics with real demand, Shorts that funnel into long-form, consistent posting.",
     "Hard limits, because breaking them gets a channel refused or demonetized: never mislead (a title or hook must be delivered by the video), no fake engagement, sub-for-sub, giveaways for subscribers or bought views, no reused or near-duplicate content, nothing harmful, no medical or financial instructions, nothing about real private people.",
     "Change a video only when you are confident the change beats keeping it. A rescript or retopic costs a rebuild, so reserve it for clearly weak videos.",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const fmt = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") + " UTC" : "unscheduled");
   const prompt = [
