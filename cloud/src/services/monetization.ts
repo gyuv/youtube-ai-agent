@@ -85,6 +85,36 @@ export async function fetchMonetizationAnalytics(token: string, now: Date) {
   return { watchHours12m: Math.round((watchMinutes / 60) * 10) / 10, shortsViews90d: Math.round(shortsViews) };
 }
 
+export interface VideoRetention {
+  videoId: string;
+  views: number;
+  /** Average share of the video watched, 0-100+ (Shorts loop past 100). */
+  avgViewedPct: number;
+  avgViewSeconds: number;
+  subsGained: number;
+}
+
+/** Per-video retention over the last 28 days: what tells a weak hook from a weak topic. */
+export async function fetchVideoRetention(token: string, now: Date): Promise<VideoRetention[]> {
+  const params = new URLSearchParams({
+    ids: "channel==MINE",
+    startDate: day(new Date(now.getTime() - 28 * 86_400_000)),
+    endDate: day(now),
+    metrics: "views,averageViewPercentage,averageViewDuration,subscribersGained",
+    dimensions: "video",
+    sort: "-views",
+    maxResults: "25",
+  });
+  const body = await getJson(`https://youtubeanalytics.googleapis.com/v2/reports?${params}`, token, "retention");
+  return ((body.rows as Array<[string, number, number, number, number]> | undefined) ?? []).map(([videoId, views, pct, secs, subs]) => ({
+    videoId,
+    views: Number(views) || 0,
+    avgViewedPct: Math.round(Number(pct) || 0),
+    avgViewSeconds: Math.round(Number(secs) || 0),
+    subsGained: Number(subs) || 0,
+  }));
+}
+
 export function hasAnalyticsScope(channel: Pick<Channel, "oauthScopes">): boolean {
   return channel.oauthScopes.includes(ANALYTICS_SCOPE);
 }
