@@ -120,31 +120,47 @@ async function runJob(job, book) {
   if (DURATION) scene.duration = Number(DURATION);
   if (RESOLUTION) scene.resolution = RESOLUTION;
 
+  let frame = null;
   if (job.character) {
     // Flow's composer takes a character OR a start frame, never both: the host wins.
     await ensureCharacter(job.character, book);
     scene.reference_images = [`asset:${job.character.name}`];
   } else if (job.imageUrl) {
     const image = await fetch(job.imageUrl, { signal: AbortSignal.timeout(60_000) });
-    if (!image.ok) throw new Error(`Couldn't download the scene image (${image.status}).`);
-    const ext = (image.headers.get("content-type") ?? "").includes("png") ? "png" : "jpg";
-    const { path } = await flow(`upload?name=hook.${ext}`, null, Buffer.from(await image.arrayBuffer()));
-    scene.first_frame = path;
+    if (image.ok) frame = { ext: (image.headers.get("content-type") ?? "").includes("png") ? "png" : "jpg", bytes: Buffer.from(await image.arrayBuffer()) };
   }
 
-  const queued = await flow("generate", { project: "lumen", scenes: [scene] });
-  const id = queued.jobs?.[0]?.id;
-  if (!id) throw new Error("flow-mcp queued nothing.");
-  log(`Generating in Flow (job ${id}, cap ${MAX_CREDITS} credits)…`);
-  const done = await waitFor(id);
-
-  const notSpent = /Nothing was generated/i.test(done?.error ?? "");
-  if (!notSpent) {
-    // Charge what Flow reported; if it didn't say, assume the cap so the budget can only err on the safe side.
-    book.spent += Number.isFinite(done?.credits) ? done.credits : MAX_CREDITS;
-    saveLedger(book);
+  // Flow is flaky (slow uploads, busy servers): try with the start frame twice, then from the prompt alone,
+  // before reporting a failure, so one hiccup never costs the video an attempt.
+  const tries = frame ? ["frame", "frame", "prompt"] : ["prompt", "prompt"];
+  let done = null;
+  let lastError = "";
+  for (const [i, mode] of tries.entries()) {
+    const attempt = { ...scene };
+    try {
+      if (mode === "frame") attempt.first_frame = (await flow(`upload?name=scene.${frame.ext}`, null, frame.bytes)).path;
+      const queued = await flow("generate", { project: "lumen", scenes: [attempt] });
+      const id = queued.jobs?.[0]?.id;
+      if (!id) throw new Error("flow-mcp queued nothing.");
+      log(`Generating in Flow (job ${id}, ${mode === "frame" ? "from the scene image" : "from the prompt"}, cap ${MAX_CREDITS} credits)…`);
+      done = await waitFor(id);
+      if (!/Nothing was generated/i.test(done?.error ?? "") && (done?.status === "done" || done?.credits > 0)) {
+        // Charge what Flow reported; if it didn't say, assume the cap so the budget can only err on the safe side.
+        book.spent += Number.isFinite(done?.credits) ? done.credits : MAX_CREDITS;
+        saveLedger(book);
+      }
+      if (done?.status === "done" && done.files?.length) break;
+      lastError = done?.error ?? `Flow job ended ${done?.status ?? "without a result"}.`;
+    } catch (error) {
+      lastError = error.message;
+    }
+    done = null;
+    if (i < tries.length - 1) {
+      log(`Flow hiccup (${lastError.slice(0, 160)}); trying again…`);
+      await sleep(20);
+    }
   }
-  if (done?.status !== "done" || !done.files?.length) throw new Error(done?.error ?? `Flow job ended ${done?.status ?? "without a result"}.`);
+  if (!done) throw new Error(lastError || "Flow produced nothing.");
 
   const file = done.files.find((f) => f.endsWith(".mp4")) ?? done.files[0];
   const put = await fetch(job.upload.url, { method: job.upload.method, headers: job.upload.headers, body: readFileSync(file), signal: AbortSignal.timeout(300_000) });

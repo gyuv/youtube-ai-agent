@@ -4,6 +4,7 @@ const db = vi.hoisted(() => ({
   channel: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   videoProject: { findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn(), create: vi.fn() },
   autopilotEvent: { create: vi.fn(), deleteMany: vi.fn() },
+  scene: { update: vi.fn() },
 }));
 const pipeline = vi.hoisted(() => ({ dispatchCloudRender: vi.fn(), fillSceneAssets: vi.fn(), generateProjectScript: vi.fn() }));
 const planner = vi.hoisted(() => ({ proposeTopic: vi.fn() }));
@@ -468,6 +469,15 @@ describe("Google Flow only", () => {
     const result = await autopilotTick(NOW);
     expect(wan2gp.queueSceneClip).toHaveBeenCalledWith(expect.any(String), "shot", "FLOW");
     expect(result.message).toContain("asked Google Flow again");
+    // A Flow hiccup doesn't use up one of the video's attempts.
+    expect(db.videoProject.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: { autopilotFailures: { increment: 1 } } }));
+  });
+
+  it("only charges the video an attempt once a scene has used its Flow retries", async () => {
+    db.channel.findMany.mockResolvedValue([onlyChannel]);
+    projectsQuery({ work: [video({ aiClipEngine: "FLOW", aiClipStatus: "FAILED", aiClipPrompt: "shot", aiClipRequestId: "retry:5" })] });
+    await autopilotTick(NOW);
+    expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "p1" }, data: { autopilotFailures: { increment: 1 } } });
   });
 
   it("treats stock clips as missing: a scene with a Pexels clip still gets a Flow shot", async () => {
