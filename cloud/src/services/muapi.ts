@@ -4,7 +4,7 @@ import { PipelineError, errorMessage } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { EDITABLE_STATUSES } from "@/lib/statuses";
 import { uploadObject } from "@/lib/storage";
-import { refreshAssetStatus } from "./pipeline";
+import { FLOW_ONLY_VISUALS, refreshAssetStatus } from "./pipeline";
 import { clipPromptFor } from "./wan2gp";
 
 /**
@@ -91,6 +91,7 @@ export async function queueMuapiClip(sceneId: string, prompt?: string, model?: s
   if (!scene) throw new PipelineError("NOT_FOUND", "Scene not found.");
   if (!EDITABLE.includes(scene.project.status)) throw new PipelineError("CONFLICT", `The project is ${scene.project.status}; scenes can't change now.`);
   if (scene.locked) throw new PipelineError("LOCKED", `Scene ${scene.sceneIndex + 1} is locked.`);
+  if (scene.project.channel.flowOnly) throw new PipelineError("CONFLICT", FLOW_ONLY_VISUALS);
   if (!scene.imageUrl) throw new PipelineError("CONFLICT", "Give the scene an image first (AI image or stock); Muapi animates it.");
 
   const endpoint = MUAPI_VIDEO_MODELS.some((m) => m.endpoint === model) ? model! : optionalEnv("MUAPI_VIDEO_MODEL", MUAPI_VIDEO_MODELS[0].endpoint);

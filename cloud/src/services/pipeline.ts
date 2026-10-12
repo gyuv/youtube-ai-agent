@@ -205,6 +205,10 @@ export interface VisualRequest {
 
 const IMAGE_EXTENSIONS: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 
+/** Shown when anything but Google Flow tries to make a visual on a Flow-only channel. */
+export const FLOW_ONLY_VISUALS =
+  "This channel is Google Flow only: every visual is a Google Flow clip, so AI images, stock, Pinterest and other video engines are turned off. Queue the scene with Google Flow instead.";
+
 function defaultVisualSource(scene: Pick<Scene, "visualSource">): "POLLINATIONS" | "PEXELS" | "PINTEREST" {
   if (scene.visualSource === VisualSource.PEXELS || scene.visualSource === VisualSource.PINTEREST) return scene.visualSource;
   return VisualSource.POLLINATIONS;
@@ -214,6 +218,7 @@ function defaultVisualSource(scene: Pick<Scene, "visualSource">): "POLLINATIONS"
 export async function regenerateSceneVisual(sceneId: string, request: VisualRequest = {}) {
   const scene = await loadScene(sceneId);
   const { project } = scene;
+  if (project.channel.flowOnly) throw new PipelineError("CONFLICT", FLOW_ONLY_VISUALS);
   const canvas = canvasFor(project.format);
   const source = request.source ?? defaultVisualSource(scene);
   const query = request.stockQuery?.trim() || scene.stockQuery || scene.narrationText.split(/\s+/).slice(0, 4).join(" ");
@@ -312,8 +317,9 @@ export interface SceneFillResult {
  * so each request stays well inside a serverless time limit and the operator sees progress.
  */
 export async function fillSceneAssets(sceneId: string, options: { visualSource?: VisualRequest["source"]; voiceOnly?: boolean } = {}): Promise<SceneFillResult> {
-  const scene = await prisma.scene.findUnique({ where: { id: sceneId } });
+  const scene = await prisma.scene.findUnique({ where: { id: sceneId }, include: { project: { select: { channel: { select: { flowOnly: true } } } } } });
   if (!scene) throw new PipelineError("NOT_FOUND", `Scene ${sceneId} not found.`);
+  const voiceOnly = options.voiceOnly || scene.project.channel.flowOnly;
   const result: SceneFillResult = { sceneIndex: scene.sceneIndex, skipped: null, generated: [], errors: [] };
   if (scene.locked) return { ...result, skipped: "locked" };
   let providerOnly = true;
@@ -331,7 +337,7 @@ export async function fillSceneAssets(sceneId: string, options: { visualSource?:
     }
   }
   // Flow-only channels: Google Flow makes every visual, so only the voice is generated here.
-  if (!options.voiceOnly && !scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene)) {
+  if (!voiceOnly && !scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene)) {
     try {
       await regenerateSceneVisual(sceneId, { source: options.visualSource });
       result.generated.push("visual");
