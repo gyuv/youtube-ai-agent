@@ -56,6 +56,24 @@ interface TtsResponse {
 }
 
 export async function synthesizeGemini(text: string, voiceName: string, voice: string, timeoutMs = 90_000): Promise<SpeechResult> {
+  // Gemini now and then answers a line with no audio (it reads the line as a request rather than
+  // something to say). Ask again, then spell out that the line is a script to read aloud.
+  const attempts = [text, text, `Read this aloud exactly as written, warmly and clearly:\n${text}`];
+  let lastError: unknown;
+  for (const input of attempts) {
+    try {
+      return await synthesizeOnce(input, text, voiceName, voice, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof PipelineError && error.message.startsWith(NO_AUDIO))) throw error;
+    }
+  }
+  throw lastError;
+}
+
+const NO_AUDIO = "Gemini TTS returned no audio";
+
+async function synthesizeOnce(input: string, text: string, voiceName: string, voice: string, timeoutMs: number): Promise<SpeechResult> {
   let res: Response;
   try {
     res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL()}:generateContent`, {
@@ -63,7 +81,7 @@ export async function synthesizeGemini(text: string, voiceName: string, voice: s
       // The key goes in a header, never the URL, so it can't end up in logs.
       headers: { "content-type": "application/json", "x-goog-api-key": requireEnv("GEMINI_API_KEY") },
       body: JSON.stringify({
-        contents: [{ parts: [{ text }] }],
+        contents: [{ parts: [{ text: input }] }],
         generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } } },
       }),
       signal: AbortSignal.timeout(timeoutMs),
@@ -78,7 +96,7 @@ export async function synthesizeGemini(text: string, voiceName: string, voice: s
     throw new PipelineError("PROVIDER", `Gemini TTS returned ${res.status}${hint}: ${body.error?.message?.slice(0, 200) ?? "no detail"}`);
   }
   const part = body.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
-  if (!part?.inlineData?.data) throw new PipelineError("PROVIDER", "Gemini TTS returned no audio for this line.");
+  if (!part?.inlineData?.data) throw new PipelineError("PROVIDER", `${NO_AUDIO} for this line.`);
 
   const sampleRate = Number(part.inlineData.mimeType?.match(/rate=(\d+)/)?.[1] ?? 24000);
   const pcm = Buffer.from(part.inlineData.data, "base64");
