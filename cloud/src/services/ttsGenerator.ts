@@ -43,6 +43,7 @@ export type TtsEngine = Pick<MsEdgeTTS, "setMetadata" | "toStream" | "close">;
 export const MAX_NARRATION_CHARS = 3000;
 /** AUDIO_24KHZ_96KBITRATE_MONO_MP3 is constant bitrate, so byte length gives the duration. */
 const MP3_BITS_PER_SECOND = 96_000;
+const EDGE_FALLBACK_GEMINI_VOICE = "Kore";
 const TICKS_PER_MS = 10_000; // edge-tts offsets are in 100-nanosecond ticks
 
 // These values are interpolated into SSML attributes by msedge-tts, so they must be strictly shaped.
@@ -168,7 +169,17 @@ export async function synthesizeSpeech(
     };
   } catch (error) {
     if (error instanceof PipelineError) throw error;
-    throw new PipelineError("PROVIDER", `edge-tts failed for voice ${voice}: ${errorMessage(error)}`, { cause: error });
+    const edgeError = `edge-tts failed for voice ${voice}: ${errorMessage(error)}`;
+    // Edge's free service sometimes refuses connections (HTTP 403); a video should not stall on it,
+    // so fall back to Gemini's free voice, which speaks the narration's language (Tamil included).
+    if (!deps.createEngine && process.env.GEMINI_API_KEY) {
+      try {
+        return await synthesizeGemini(narration, EDGE_FALLBACK_GEMINI_VOICE, `${GEMINI_PREFIX}${EDGE_FALLBACK_GEMINI_VOICE}`, options.timeoutMs);
+      } catch (fallbackError) {
+        throw new PipelineError("PROVIDER", `${edgeError}; Gemini fallback also failed: ${errorMessage(fallbackError)}`, { cause: error });
+      }
+    }
+    throw new PipelineError("PROVIDER", edgeError, { cause: error });
   } finally {
     engine.close();
   }
