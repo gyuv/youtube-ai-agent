@@ -488,6 +488,23 @@ describe("Google Flow only", () => {
     expect(pipeline.dispatchCloudRender).not.toHaveBeenCalled();
   });
 
+  it("sends a voiced video straight to Flow, with no AI images made first", async () => {
+    db.channel.findMany.mockResolvedValue([onlyChannel]);
+    const voiced = project({ status: "SCRIPTED", scenes: [0, 1].map((i) => ({ ...ready(i), imageUrl: null })) });
+    projectsQuery({ work: [voiced] });
+    expect((await autopilotTick(NOW)).action).toBe("planned");
+    expect(flowPlan.planFlowScenes).toHaveBeenCalledWith("p1");
+    expect(pipeline.fillSceneAssets).not.toHaveBeenCalled();
+  });
+
+  it("only voices scenes on a Flow-only channel", async () => {
+    db.channel.findMany.mockResolvedValue([onlyChannel]);
+    pipeline.fillSceneAssets.mockResolvedValue({ sceneIndex: 0, generated: ["audio"], errors: [] });
+    projectsQuery({ work: [project({ status: "SCRIPTED", scenes: [{ ...ready(0), voiceAudioUrl: null, imageUrl: null }] })] });
+    await autopilotTick(NOW);
+    expect(pipeline.fillSceneAssets).toHaveBeenCalledWith("s0", expect.objectContaining({ voiceOnly: true }));
+  });
+
   it("renders once every scene is a Flow clip", async () => {
     db.channel.findMany.mockResolvedValue([onlyChannel]);
     projectsQuery({ work: [video({ aiClipEngine: "FLOW", aiClipStatus: null, videoClipUrl: "https://cdn/clip.mp4" })] });

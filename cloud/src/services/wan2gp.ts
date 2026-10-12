@@ -136,7 +136,7 @@ export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WA
     const scene = await prisma.scene.findFirst({
       where,
       orderBy: { aiClipUpdatedAt: "asc" },
-      include: { project: { select: { id: true, format: true, channel: { select: { mascotName: true, mascotLook: true } } } } },
+      include: { project: { select: { id: true, format: true, channel: { select: { mascotName: true, mascotLook: true, flowOnly: true } } } } },
     });
     if (!scene) return null;
 
@@ -152,7 +152,8 @@ export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WA
       prompt: scene.aiClipPrompt?.trim() || (engine === "PINTEREST" ? scene.stockQuery?.trim() || scene.narrationText : clipPromptFor(scene)),
       ...clipResolution(scene.project.format),
       durationSeconds: scene.durationSeconds,
-      imageUrl: scene.imageUrl,
+      // Flow-only channels: Flow creates the visual from the prompt; an earlier image is never used.
+      imageUrl: engine === "FLOW" && scene.project.channel.flowOnly ? null : scene.imageUrl,
       ...(engine === "FLOW"
         ? { character: scene.sceneIndex === 0 && scene.project.channel.mascotName && scene.project.channel.mascotLook ? { name: scene.project.channel.mascotName, look: scene.project.channel.mascotLook } : null }
         : {}),
