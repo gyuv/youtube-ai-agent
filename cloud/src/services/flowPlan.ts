@@ -138,13 +138,14 @@ export function buildFlowScenesPrompt(input: {
     `You are Script Lab, directing a fully AI-generated cinematic video for a YouTube channel about ${input.niche}. Every scene below becomes one Google Flow video clip.`,
     "Write one shot per scene so the clips cut together as one film: the same characters with the same look in every shot, one consistent art style, colour palette and lighting, and camera moves that flow from shot to shot. Cinematic: depth of field, warm light, gentle dolly, crane or orbit moves, expressive character animation.",
     "Each shot is one continuous take under 8 seconds showing exactly what its narration describes. Never put words, letters or logos on screen.",
+    "Flow creates each shot from your prompt alone (there is no start image), so describe everything: the setting, every character's exact look (species, colours, clothing), the action, the camera and the light, and repeat each recurring character's description word for word in every shot so they look the same throughout.",
     input.mascot
-      ? `The first scene stars the channel's host, ${input.mascot.name} (${input.mascot.look}), attached as a Flow character: refer to them by name there. The other scenes start from their own image, so describe characters as in the image prompt.`
-      : "Each clip starts from its scene's image: describe motion of what that image shows.",
+      ? `The first scene stars the channel's host, ${input.mascot.name} (${input.mascot.look}), attached as a Flow character: refer to them by name there.`
+      : "",
   ].join("\n");
   const prompt = [
     `Video: ${input.title} (${input.format === "SHORT" ? "vertical 9:16 Short" : "16:9 long-form"})`,
-    ...input.scenes.map((s) => `Scene index ${s.sceneIndex}: narration "${s.narration}" | image: ${s.imagePrompt || "(none)"}`),
+    ...input.scenes.map((s) => `Scene index ${s.sceneIndex}: narration "${s.narration}" | visual idea: ${s.imagePrompt || "(none)"}`),
     "Return one shot for each scene index listed.",
   ].join("\n");
   return { system, prompt };

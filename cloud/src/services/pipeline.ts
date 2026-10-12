@@ -311,7 +311,7 @@ export interface SceneFillResult {
  * Fill whatever one scene is missing (voice, then visual). The studio calls this scene by scene
  * so each request stays well inside a serverless time limit and the operator sees progress.
  */
-export async function fillSceneAssets(sceneId: string, options: { visualSource?: VisualRequest["source"] } = {}): Promise<SceneFillResult> {
+export async function fillSceneAssets(sceneId: string, options: { visualSource?: VisualRequest["source"]; voiceOnly?: boolean } = {}): Promise<SceneFillResult> {
   const scene = await prisma.scene.findUnique({ where: { id: sceneId } });
   if (!scene) throw new PipelineError("NOT_FOUND", `Scene ${sceneId} not found.`);
   const result: SceneFillResult = { sceneIndex: scene.sceneIndex, skipped: null, generated: [], errors: [] };
@@ -330,7 +330,8 @@ export async function fillSceneAssets(sceneId: string, options: { visualSource?:
       fail("Voice", error);
     }
   }
-  if (!scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene)) {
+  // Flow-only channels: Google Flow makes every visual, so only the voice is generated here.
+  if (!options.voiceOnly && !scene.imageUrl && !scene.videoClipUrl && !pinterestPending(scene)) {
     try {
       await regenerateSceneVisual(sceneId, { source: options.visualSource });
       result.generated.push("visual");

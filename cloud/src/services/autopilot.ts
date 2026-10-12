@@ -201,13 +201,16 @@ function findWork(projects: WorkProject[], channels: Map<string, AutopilotChanne
   projects = projects.filter((p) => !p.autopilotRetryAt || p.autopilotRetryAt.getTime() <= now.getTime());
   for (const p of projects) {
     const channel = channels.get(p.channelId)!;
-    if (channel.flowOnly && p.status === ProjectStatus.ASSETS_READY) {
+    // Flow-only videos go to Flow as soon as every scene is voiced: Flow makes all the visuals.
+    const voiced = p.scenes.length > 0 && p.scenes.every((s) => s.voiceAudioUrl);
+    if (channel.flowOnly && (p.status === ProjectStatus.ASSETS_READY || (p.status === ProjectStatus.SCRIPTED && voiced))) {
       // Every scene a Flow clip: plan the shots (even while some are in flight), retry any that failed, and render only when all exist.
       if (p.scenes.some((s) => needsFlowShot(s))) return { kind: "flowscenes" as const, project: p, channel };
       const failed = p.scenes.filter((s) => s.aiClipEngine === "FLOW" && s.aiClipStatus === "FAILED" && !s.locked);
       if (failed.length) return { kind: "flowretry" as const, project: p, channel, sceneIds: failed.map((s) => s.id) };
     }
     if (awaitingPinterest(p, now, flowReady, channel.flowOnly)) continue;
+    if (channel.flowOnly && p.status === ProjectStatus.SCRIPTED && voiced) continue; // clips still on their way
     if (channel.flowOnly && p.status === ProjectStatus.ASSETS_READY) {
       // Only real Flow clips count: a stand-in stock clip or image never reaches a Flow-only video.
       if (!p.scenes.every((s) => isFlowClip(s) || s.locked)) continue;
@@ -224,8 +227,9 @@ function findWork(projects: WorkProject[], channels: Map<string, AutopilotChanne
   }
   for (const p of projects) {
     if (p.status !== ProjectStatus.SCRIPTED && p.status !== ProjectStatus.FAILED) continue;
-    const scene = p.scenes.find((s) => sceneNeedsFill(s) && !s.locked);
-    if (scene) return { kind: "fill" as const, project: p, channel: channels.get(p.channelId)!, sceneId: scene.id };
+    const ch = channels.get(p.channelId)!;
+    const scene = p.scenes.find((s) => !s.locked && (ch.flowOnly ? !s.voiceAudioUrl : sceneNeedsFill(s)));
+    if (scene) return { kind: "fill" as const, project: p, channel: ch, sceneId: scene.id };
   }
   for (const p of projects) {
     if (p.status === ProjectStatus.DRAFT) return { kind: "script" as const, project: p, channel: channels.get(p.channelId)! };
@@ -529,7 +533,7 @@ async function tick(now: Date): Promise<TickResult> {
         return { action: "dispatched", message, more: true, swept, ...ids };
       }
       if (work.kind === "fill") {
-        const result = await fillSceneAssets(work.sceneId, { visualSource: autopilotVisualSource(channel.autopilotVisualSource) });
+        const result = await fillSceneAssets(work.sceneId, { visualSource: autopilotVisualSource(channel.autopilotVisualSource), voiceOnly: channel.flowOnly });
         if (result.errors.length) {
           const message = result.errors.join("; ");
           throw result.providerOnly ? new PipelineError("PROVIDER", message) : new Error(message);
