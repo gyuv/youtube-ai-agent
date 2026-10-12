@@ -5,7 +5,7 @@ import { PipelineError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { EDITABLE_STATUSES } from "@/lib/statuses";
 import { createSignedUpload, publicObjectUrl, type SignedUpload } from "@/lib/storage";
-import { refreshAssetStatus } from "./pipeline";
+import { FLOW_ONLY_VISUALS, refreshAssetStatus } from "./pipeline";
 
 /**
  * AI video clips from Wan2GP (https://github.com/deepbeepmeep/Wan2GP), which needs an NVIDIA GPU
@@ -72,6 +72,7 @@ async function loadEditableScene(sceneId: string) {
 /** Ask a worker for a clip (the Wan2GP GPU worker by default). An empty prompt uses the scene's image prompt. */
 export async function queueSceneClip(sceneId: string, prompt?: string, engine: "WAN2GP" | "FLOW" = "WAN2GP") {
   const scene = await loadEditableScene(sceneId);
+  if (engine !== "FLOW" && scene.project.channel.flowOnly) throw new PipelineError("CONFLICT", FLOW_ONLY_VISUALS);
   const text = prompt?.trim() || clipPromptFor(scene, scene.project.channel.defaultVisualPrompt);
   return prisma.scene.update({
     where: { id: sceneId },
