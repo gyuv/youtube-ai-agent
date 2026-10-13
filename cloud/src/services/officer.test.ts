@@ -73,10 +73,30 @@ it("takes down a scheduled non-Flow upload before it goes live and sends the vid
   db.videoProject.findMany
     .mockResolvedValueOnce([])
     .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([{ id: "p4", channelId: "c1", title: "Crow", topic: "crow", youtubeVideoId: "vid1", channel: { id: "c1", name: "K", oauthRefreshTokenEnc: "e", oauthScopes: ["manage"] }, scenes: [stock] }]);
+    .mockResolvedValueOnce([{ id: "p4", channelId: "c1", title: "Crow", topic: "crow", youtubeVideoId: "vid1", channel: { id: "c1", name: "K", language: "ta", oauthRefreshTokenEnc: "e", oauthScopes: ["manage"] }, renderFinishedAt: null, scenes: [stock] }]);
   const r = await runOfficer(3, NOW);
   expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("videos?id=vid1"), expect.objectContaining({ method: "DELETE" }));
   expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "p4" }, data: expect.objectContaining({ status: "ASSETS_READY", youtubeVideoId: null }) });
   expect(r.resolved[0]).toContain("took down");
+  vi.unstubAllGlobals();
+});
+
+it("takes down a scheduled Tamil Flow video rendered before the Tamil caption font and re-renders it", async () => {
+  const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const flow = { videoClipUrl: "https://cdn/flow.mp4", aiClipEngine: "FLOW", aiClipStatus: null, locked: false };
+  const channel = { id: "c1", name: "K", language: "ta", oauthRefreshTokenEnc: "e", oauthScopes: ["manage"] };
+  db.videoProject.findMany
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([
+      { id: "old", channelId: "c1", title: "Hare", topic: "hare", youtubeVideoId: "v1", renderFinishedAt: new Date("2026-10-12T02:35:00Z"), channel, scenes: [flow] },
+      { id: "new", channelId: "c1", title: "Song", topic: "song", youtubeVideoId: "v2", renderFinishedAt: new Date("2026-10-13T09:00:00Z"), channel, scenes: [flow] },
+    ]);
+  const r = await runOfficer(3, NOW);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("videos?id=v1"), expect.objectContaining({ method: "DELETE" }));
+  expect(db.videoProject.update).toHaveBeenCalledWith({ where: { id: "old" }, data: expect.objectContaining({ status: "ASSETS_READY", youtubeVideoId: null }) });
+  expect(r.resolved).toEqual(['took down "Hare" to re-render it with readable Tamil captions']);
   vi.unstubAllGlobals();
 });

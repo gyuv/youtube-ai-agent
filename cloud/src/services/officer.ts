@@ -13,6 +13,9 @@ import { sceneHasAssets } from "./pipeline";
  * (the Flow worker's computer being off) stays open, and closes itself when it's fixed.
  */
 
+/** Renders finished before this lacked a Tamil caption font (letters drew as boxes). */
+const CAPTION_FONT_FIXED_AT = new Date("2026-10-13T08:00:00Z");
+
 export const OFFICER_ENGINE = "OFFICER";
 /** A video the autopilot gave up on is revived this many times before its topic is dropped. */
 export const MAX_REVIVES = 2;
@@ -87,19 +90,24 @@ export async function runOfficer(maxFailures = MAX_FAILURES, now: Date = new Dat
       title: true,
       topic: true,
       youtubeVideoId: true,
-      channel: { select: { id: true, name: true, oauthRefreshTokenEnc: true, oauthScopes: true } },
+      renderFinishedAt: true,
+      channel: { select: { id: true, name: true, language: true, oauthRefreshTokenEnc: true, oauthScopes: true } },
       scenes: { select: { videoClipUrl: true, aiClipEngine: true, aiClipStatus: true, locked: true } },
     },
   });
   for (const p of scheduled) {
-    if (p.scenes.every((s) => isFlowClip(s) || s.locked)) continue;
+    const notFlowVideo = !p.scenes.every((s) => isFlowClip(s) || s.locked);
+    // Renders before the Tamil caption font shipped show boxes instead of letters in non-English captions.
+    const brokenCaptions = !p.channel.language.startsWith("en") && !!p.renderFinishedAt && p.renderFinishedAt < CAPTION_FONT_FIXED_AT;
+    if (!notFlowVideo && !brokenCaptions) continue;
+    const why = notFlowVideo ? "isn't Google Flow video" : "has captions that show boxes instead of Tamil letters";
     const name = `"${p.title ?? p.topic}"`;
     const link = `https://youtu.be/${p.youtubeVideoId}`;
     if (!p.channel.oauthRefreshTokenEnc || !p.channel.oauthScopes.includes(MANAGE_SCOPE)) {
       const open = await prisma.mastermindRequest.findFirst({ where: { channelId: p.channelId, kind: "delete_video", status: "open", body: { contains: link } } });
       if (!open) {
         await prisma.mastermindRequest.create({
-          data: { channelId: p.channelId, kind: "delete_video", title: `Delete the scheduled ${name}`, body: `${link} is scheduled but isn't Google Flow video. Delete it in YouTube Studio before it goes live, or reconnect YouTube on the channel page so the officer can do it.` },
+          data: { channelId: p.channelId, kind: "delete_video", title: `Delete the scheduled ${name}`, body: `${link} is scheduled but ${why}. Delete it in YouTube Studio before it goes live, or reconnect YouTube on the channel page so the officer can do it.` },
         });
         result.open.push(`delete ${name} on YouTube`);
       }
@@ -113,8 +121,10 @@ export async function runOfficer(maxFailures = MAX_FAILURES, now: Date = new Dat
       where: { id: p.id },
       data: { status: ProjectStatus.ASSETS_READY, youtubeVideoId: null, publishedAt: null, renderedVideoUrl: null, publishStartedAt: null, youtubeLocked: false, youtubeCheckedAt: null, autopilotFailures: 0 },
     });
-    await incident(p.channelId, `Took down ${name}`, `${link} had been scheduled with stand-in visuals, but this channel posts Google Flow video only.\n\nResolved: deleted it from YouTube before it went live and sent the video back for Flow clips; it is uploaded again once every scene is a Flow clip.`, "done", now);
-    result.resolved.push(`took down the non-Flow upload of ${name} and is rebuilding it with Flow`);
+    await incident(p.channelId, `Took down ${name}`, notFlowVideo
+      ? `${link} had been scheduled with stand-in visuals, but this channel posts Google Flow video only.\n\nResolved: deleted it from YouTube before it went live and sent the video back for Flow clips; it is uploaded again once every scene is a Flow clip.`
+      : `${link} had been scheduled with captions that showed boxes instead of Tamil letters.\n\nResolved: deleted it from YouTube before it went live; it renders again with the Tamil caption font (same Flow clips) and is re-uploaded for the same slot.`, "done", now);
+    result.resolved.push(notFlowVideo ? `took down the non-Flow upload of ${name} and is rebuilding it with Flow` : `took down ${name} to re-render it with readable Tamil captions`);
     } catch (error) {
       result.open.push(`couldn't take down ${name} (${error instanceof Error ? error.message : String(error)}); retrying next hour`);
     }
