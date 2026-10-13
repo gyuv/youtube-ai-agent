@@ -78,7 +78,7 @@ function Captions({ scene, format }: { scene: VideoScene; format: VideoFormat })
 
   return (
     <AbsoluteFill style={style.box}>
-      <div style={{ ...style.text, fontFamily: `${CAPTION_FONT_FAMILY}, "Noto Sans Devanagari", sans-serif`, fontWeight: 800, color: "white" }}>
+      <div style={{ ...style.text, fontFamily: `${CAPTION_FONT_FAMILY}, "Noto Sans Tamil", "Noto Sans Devanagari", sans-serif`, fontWeight: 800, color: "white" }}>
         {page.words.map((word, i) => (
           <span key={`${word.startMs}-${i}`} style={{ color: nowMs >= word.startMs && nowMs < word.endMs ? "#FFD60A" : "white" }}>
             {word.word}
@@ -104,7 +104,7 @@ function SceneView({ scene, index, format, captions }: { scene: VideoScene; inde
   );
 }
 
-const brandFont = `${CAPTION_FONT_FAMILY}, sans-serif`;
+const brandFont = `${CAPTION_FONT_FAMILY}, "Noto Sans Tamil", "Noto Sans Devanagari", sans-serif`;
 
 function Avatar({ brand, size }: { brand: VideoBrand; size: number }) {
   return brand.avatarSrc ? (

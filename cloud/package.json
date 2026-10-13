@@ -23,6 +23,7 @@
   "dependencies": {
     "@fontsource/montserrat": "^5.3.0",
     "@fontsource/noto-sans-devanagari": "^5.3.0",
+    "@fontsource/noto-sans-tamil": "^5.3.0",
     "@google/genai": "^2.24.0",
     "@prisma/adapter-pg": "^7.0.0",
     "@prisma/client": "^7.0.0",

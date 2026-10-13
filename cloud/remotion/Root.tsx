@@ -1,6 +1,7 @@
 import { Composition, continueRender, delayRender, type CalculateMetadataFunction } from "remotion";
 import montserratLatin800 from "@fontsource/montserrat/files/montserrat-latin-800-normal.woff2";
 import devanagari700 from "@fontsource/noto-sans-devanagari/files/noto-sans-devanagari-devanagari-700-normal.woff2";
+import tamil700 from "@fontsource/noto-sans-tamil/files/noto-sans-tamil-tamil-700-normal.woff2";
 import { CAPTION_FONT_FAMILY, LumenVideo } from "./LumenVideo";
 import { COMPOSITION_ID, FPS, dimensionsFor, totalFrames, type LumenVideoProps } from "./timeline";
 
@@ -9,6 +10,7 @@ const fontsReady = delayRender("Loading caption fonts");
 Promise.all([
   new FontFace(CAPTION_FONT_FAMILY, `url(${montserratLatin800}) format("woff2")`, { weight: "800" }).load(),
   new FontFace("Noto Sans Devanagari", `url(${devanagari700}) format("woff2")`, { weight: "700" }).load(),
+  new FontFace("Noto Sans Tamil", `url(${tamil700}) format("woff2")`, { weight: "700" }).load(),
 ])
   .then((faces) => faces.forEach((face) => document.fonts.add(face)))
   .catch((error) => console.warn("Caption fonts failed to load; falling back to system fonts", error))
