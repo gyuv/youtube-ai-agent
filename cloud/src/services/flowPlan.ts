@@ -170,6 +170,13 @@ export function needsFlowShot(scene: ShotScene): boolean {
 }
 
 /** Plan and queue a Flow clip for every scene of a Flow-only video that doesn't have one yet. */
+/** A cinematic Flow prompt built without Gemini, from the scene's own visual prompt and narration. */
+export function fallbackFlowShot(scene: { sceneIndex: number; visualPrompt: string | null; narrationText: string }, mascot: { name: string; look: string } | null): string {
+  const subject = scene.visualPrompt?.trim() || scene.narrationText;
+  const host = mascot && scene.sceneIndex === 0 ? ` ${mascot.name}, ${mascot.look}, appears in the shot.` : "";
+  return `Cinematic 3D animated shot for young children: ${subject}.${host} Bright, colourful Pixar-style animation, soft lighting, gentle camera movement, no text on screen.`.slice(0, 1500);
+}
+
 export async function planFlowScenes(projectId: string, client?: GeminiClient): Promise<{ queued: number }> {
   const project = await prisma.videoProject.findUnique({
     where: { id: projectId },
@@ -186,8 +193,17 @@ export async function planFlowScenes(projectId: string, client?: GeminiClient): 
     scenes: todo.map((s) => ({ sceneIndex: s.sceneIndex, narration: s.narrationText, imagePrompt: s.visualPrompt ?? "" })),
     mascot: project.channel.mascotName && project.channel.mascotLook ? { name: project.channel.mascotName, look: project.channel.mascotLook } : null,
   });
-  const { value: shots } = await generateGeminiJson({ task: "Flow shot list", systemInstruction: system, prompt, responseJsonSchema: SHOTS_JSON_SCHEMA, parse: parseFlowShots, client });
-  const byIndex = new Map(shots.map((s) => [s.sceneIndex, s.prompt]));
+  const mascot = project.channel.mascotName && project.channel.mascotLook ? { name: project.channel.mascotName, look: project.channel.mascotLook } : null;
+  let byIndex: Map<number, string>;
+  try {
+    const { value: shots } = await generateGeminiJson({ task: "Flow shot list", systemInstruction: system, prompt, responseJsonSchema: SHOTS_JSON_SCHEMA, parse: parseFlowShots, client });
+    byIndex = new Map(shots.map((s) => [s.sceneIndex, s.prompt]));
+  } catch (error) {
+    // Gemini's free quota (429) or an outage must not stall the video: build each shot from the
+    // script's own scene description instead.
+    if (!(error instanceof PipelineError && error.code === "PROVIDER")) throw error;
+    byIndex = new Map(todo.map((s) => [s.sceneIndex, fallbackFlowShot(s, mascot)]));
+  }
   let queued = 0;
   for (const scene of todo) {
     await queueSceneClip(scene.id, byIndex.get(scene.sceneIndex) ?? scene.visualPrompt ?? scene.narrationText, FLOW_ENGINE);
