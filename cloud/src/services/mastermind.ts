@@ -29,7 +29,8 @@ import { generateProjectScript } from "./pipeline";
  * table however aggressive the strategy.
  */
 
-export const MASTERMIND_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Once a day: each run spends free Gemini quota that scripts, Flow shot lists and voices also need.
+export const MASTERMIND_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** Rebuilding a video takes a while; leave ones this close to their slot alone (title changes aside). */
 export const REBUILD_LEAD_MS = 4 * 60 * 60 * 1000;
 const MAX_REBUILDS_PER_RUN = 2;
@@ -285,7 +286,7 @@ export async function runMastermind(channel: Channel, now: Date = new Date(), cl
 }
 
 /** Carry out the plan's decisions within the limits above. Exported for tests. */
-export async function applyPlan(channel: Pick<Channel, "id" | "topicBacklog">, plan: MastermindPlan, candidates: Candidate[], now: Date): Promise<MastermindResult> {
+export async function applyPlan(channel: Pick<Channel, "id" | "topicBacklog"> & { flowOnly?: boolean }, plan: MastermindPlan, candidates: Candidate[], now: Date): Promise<MastermindResult> {
   const applied: string[] = [];
   const skipped: string[] = [];
   const byId = new Map(candidates.map((c) => [c.id, c]));
@@ -299,6 +300,12 @@ export async function applyPlan(channel: Pick<Channel, "id" | "topicBacklog">, p
     if (rebuild) {
       if (c.lockedScenes) {
         skipped.push(`${name}: kept the script, you locked scenes in it`);
+        continue;
+      }
+      if (channel.flowOnly && c.status !== ProjectStatus.DRAFT) {
+        // A Flow-only video already in production has voices and Flow shots queued; rebuilding it
+        // throws them away and spends the free voice and Gemini quota a second time.
+        skipped.push(`${name}: kept the script, it is already in Flow production`);
         continue;
       }
       if (c.scheduledFor && c.scheduledFor.getTime() - now.getTime() < REBUILD_LEAD_MS) {
