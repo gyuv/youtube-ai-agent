@@ -168,6 +168,8 @@ async function runJob(job, book) {
   return done.credits;
 }
 
+let lastIdleLog = 0;
+
 async function tick() {
   const book = ledger();
   const left = DAILY_CREDITS - book.spent;
@@ -184,7 +186,15 @@ async function tick() {
     return POLL_SECONDS;
   }
   const job = await lumen("/api/flow/claim", { creditsLeft: left });
-  if (!job) return POLL_SECONDS;
+  if (!job) {
+    // Say so now and then, so a quiet window doesn't look stuck.
+    if (Date.now() - lastIdleLog > 10 * 60_000) {
+      lastIdleLog = Date.now();
+      log(`Online, no clips queued (${left} credits left today); checking every ${POLL_SECONDS}s.`);
+    }
+    return POLL_SECONDS;
+  }
+  lastIdleLog = 0;
   log(`Claimed scene ${job.sceneId}${job.character ? ` with host "${job.character.name}"` : ""}.`);
   try {
     const credits = await runJob(job, book);

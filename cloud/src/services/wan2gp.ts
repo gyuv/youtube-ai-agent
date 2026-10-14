@@ -29,6 +29,9 @@ import { FLOW_ONLY_VISUALS, refreshAssetStatus } from "./pipeline";
 
 export const CLAIM_TTL_MS = 45 * 60 * 1000;
 const EDITABLE = [...EDITABLE_STATUSES];
+// A video the autopilot marked FAILED (a voice or render hiccup) still needs its clips; otherwise its
+// queued scenes would wait forever while the worker sits idle.
+const CLAIMABLE = [...EDITABLE, ProjectStatus.FAILED];
 const MAX_PROMPT_CHARS = 1500;
 
 /** Wan 2.x is trained at 480p/720p; 480p keeps a free Colab T4 at a few minutes per clip. */
@@ -113,7 +116,7 @@ export interface ClipJob {
 function claimableWhere(engine: WorkerEngine, now: Date) {
   const stale = new Date(now.getTime() - CLAIM_TTL_MS);
   return {
-    project: { status: { in: EDITABLE } },
+    project: { status: { in: CLAIMABLE } },
     locked: false,
     // Each worker claims only its own engine's requests; Muapi clips are polled by the app itself.
     AND: [
@@ -181,7 +184,7 @@ export async function completeClip(report: ClipReport, engine: WorkerEngine = "W
     scene.aiClipStatus === AiClipStatus.RUNNING &&
     scene.aiClipUpdatedAt?.getTime() === claimedAt.getTime() &&
     !scene.locked &&
-    EDITABLE.includes(scene.project.status as ProjectStatus);
+    CLAIMABLE.includes(scene.project.status as ProjectStatus);
   if (!current) return { applied: false };
 
   const { count } = await prisma.scene.updateMany({
