@@ -1,5 +1,6 @@
 import { AiClipStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
+import { dispatchAutopilotRun } from "./renderDispatcher";
 
 /**
  * Is a Google Flow worker actually there? It runs on someone's computer, which may be off for days,
@@ -51,4 +52,27 @@ export async function dropQueuedFlowClips(projectId: string, reason: string, now
     data: { aiClipStatus: AiClipStatus.FAILED, aiClipError: reason, aiClipUpdatedAt: now },
   });
   return count;
+}
+
+const NUDGE_ENGINE = "AUTOPILOT_NUDGE";
+const OFFICER_ENGINE = "OFFICER"; // officer.ts writes it on every autopilot tick (it imports this file)
+/** GitHub often runs the hourly autopilot schedule only every few hours; past this, the worker's poll starts one. */
+export const AUTOPILOT_QUIET_MS = 65 * 60 * 1000;
+const NUDGE_EVERY_MS = 30 * 60 * 1000;
+
+/**
+ * The Flow worker polls every few seconds from the operator's PC, so its poll doubles as a backup
+ * clock: when no autopilot run has checked in (the officer's heartbeat) for over an hour, start one,
+ * so renders and uploads still make their posting slots. At most one nudge per half hour.
+ */
+export async function nudgeAutopilotIfQuiet(now = new Date()): Promise<boolean> {
+  const [officer, nudge] = await Promise.all([
+    prisma.workerHeartbeat.findUnique({ where: { engine: OFFICER_ENGINE } }),
+    prisma.workerHeartbeat.findUnique({ where: { engine: NUDGE_ENGINE } }),
+  ]);
+  if (officer && now.getTime() - officer.seenAt.getTime() < AUTOPILOT_QUIET_MS) return false;
+  if (nudge && now.getTime() - nudge.seenAt.getTime() < NUDGE_EVERY_MS) return false;
+  await prisma.workerHeartbeat.upsert({ where: { engine: NUDGE_ENGINE }, create: { engine: NUDGE_ENGINE, seenAt: now }, update: { seenAt: now } });
+  await dispatchAutopilotRun();
+  return true;
 }

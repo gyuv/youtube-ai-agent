@@ -67,39 +67,58 @@ function httpStatusOf(error: unknown): number | undefined {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Every Gemini key the studio has: GEMINI_API_KEY plus optional GEMINI_API_KEY_2 … GEMINI_API_KEY_5.
+ * Each free key has its own daily quota, so when one is spent (429) the next one is used.
+ */
+export function geminiApiKeys(env: Record<string, string | undefined> = process.env): string[] {
+  const keys = [env.GEMINI_API_KEY, env.GEMINI_API_KEY_2, env.GEMINI_API_KEY_3, env.GEMINI_API_KEY_4, env.GEMINI_API_KEY_5]
+    .map((k) => k?.trim())
+    .filter((k): k is string => Boolean(k));
+  return [...new Set(keys)];
+}
+
 export async function generateGeminiJson<T>(request: GeminiJsonRequest<T>): Promise<{ model: string; value: T }> {
-  const client = request.client ?? new GoogleGenAI({ apiKey: requireEnv("GEMINI_API_KEY") });
+  const keys = request.client ? [null] : geminiApiKeys();
+  if (!keys.length) requireEnv("GEMINI_API_KEY");
   const models = [...new Set(request.models ?? geminiModels())];
   const retryDelayMs = request.retryDelayMs ?? 1500;
   const failures: string[] = [];
 
-  for (const model of models) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const response = await client.models.generateContent({
-          model,
-          contents: request.parts?.length
-            ? ([{ role: "user", parts: [...request.parts, { text: request.prompt }] }] as never)
-            : request.prompt,
-          config: {
-            ...request.config,
-            systemInstruction: request.systemInstruction,
-            responseMimeType: "application/json",
-            responseJsonSchema: request.responseJsonSchema,
-          },
-        });
-        return { model, value: request.parse(response.text) };
-      } catch (error) {
-        const status = httpStatusOf(error);
-        failures.push(`${model} (attempt ${attempt}): ${errorMessage(error)}`);
-        if (status === 400 || status === 401 || status === 403) {
-          // Bad key, disabled API or malformed request: retrying or switching models won't help.
-          throw new PipelineError("PROVIDER", `Gemini rejected the request (${status}): ${errorMessage(error)}`, { cause: error });
+  for (const [k, key] of keys.entries()) {
+    const client = request.client ?? new GoogleGenAI({ apiKey: key! });
+    let quotaOnly = true;
+    for (const model of models) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const response = await client.models.generateContent({
+            model,
+            contents: request.parts?.length
+              ? ([{ role: "user", parts: [...request.parts, { text: request.prompt }] }] as never)
+              : request.prompt,
+            config: {
+              ...request.config,
+              systemInstruction: request.systemInstruction,
+              responseMimeType: "application/json",
+              responseJsonSchema: request.responseJsonSchema,
+            },
+          });
+          return { model, value: request.parse(response.text) };
+        } catch (error) {
+          const status = httpStatusOf(error);
+          failures.push(`${keys.length > 1 ? `key ${k + 1} ` : ""}${model} (attempt ${attempt}): ${errorMessage(error)}`);
+          if (status === 400 || status === 401 || status === 403) {
+            // Bad key, disabled API or malformed request: retrying or switching models won't help.
+            throw new PipelineError("PROVIDER", `Gemini rejected the request (${status}): ${errorMessage(error)}`, { cause: error });
+          }
+          if (status !== 429) quotaOnly = false;
+          if (status === 429 || status === 404) break; // quota exhausted or model retired: next model
+          if (attempt < 2) await sleep(retryDelayMs * attempt);
         }
-        if (status === 429 || status === 404) break; // quota exhausted or model retired: next model
-        if (attempt < 2) await sleep(retryDelayMs * attempt);
       }
     }
+    // Only a spent quota is worth another key; other failures would fail the same way.
+    if (!quotaOnly) break;
   }
   throw new PipelineError("PROVIDER", `${request.task} failed on every Gemini model:\n${failures.join("\n")}`);
 }
