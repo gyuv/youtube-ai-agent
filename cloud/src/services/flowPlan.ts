@@ -175,7 +175,8 @@ export function fallbackFlowShot(scene: { sceneIndex: number; visualPrompt: stri
   const subject = scene.visualPrompt?.trim() || scene.narrationText;
   // The host's look travels as the attached Flow character, so only the name goes in the prompt.
   const host = mascot && scene.sceneIndex === 0 ? ` ${mascot.name} appears in the shot.` : "";
-  return `Cinematic 3D animated shot for young children: ${subject}.${host} Bright, colourful Pixar-style animation, soft lighting, gentle camera movement, no text on screen.`.slice(0, 1500);
+  // The scene's own subject comes first: the worker finds a lost clip in Flow by the prompt's start.
+  return `${subject.replace(/[.\s]+$/, "")}.${host} Cinematic 3D animated shot for young children, bright colourful Pixar-style animation, soft lighting, gentle camera movement, no text on screen.`.slice(0, 1500);
 }
 
 export async function planFlowScenes(projectId: string, client?: GeminiClient): Promise<{ queued: number }> {
