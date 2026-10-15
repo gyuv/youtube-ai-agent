@@ -162,6 +162,7 @@ async function runJob(job, book) {
       // costs no credits, instead of paying for it again.
       const recovered = await recoverClip(job.prompt);
       if (recovered) done = { status: "done", files: recovered, credits: 0 };
+      else lastError = `${lastError.slice(0, 300)} | recovery: ${lastRecoveryError || "no finished clip with this title in Flow"}`;
       break;
     }
     if (i < tries.length - 1) {
@@ -177,6 +178,8 @@ async function runJob(job, book) {
   return done.credits;
 }
 
+let lastRecoveryError = "";
+
 /** Fetch a clip Flow already made (and charged for) by its title prefix; flow_download is free. */
 async function recoverClip(prompt) {
   for (const len of [100, 70]) {
@@ -189,7 +192,8 @@ async function recoverClip(prompt) {
         return files;
       }
     } catch (error) {
-      log(`Couldn't recover the clip yet (${String(error.message).slice(0, 120)}).`);
+      lastRecoveryError = String(error.message).slice(0, 300);
+      log(`Couldn't recover the clip yet (${lastRecoveryError.slice(0, 120)}).`);
     }
   }
   return null;
