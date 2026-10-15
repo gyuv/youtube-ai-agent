@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { analyzeChannel, findChannelToAnalyze } from "./analytics";
 import { findChannelForGrowthReview, packageProject, runGrowthReview } from "./labsAutomation";
 import { dispatchCloudRender, fillSceneAssets, generateProjectScript, sceneHasAssets, sceneNeedsFill } from "./pipeline";
-import { isFlowClip, needsFlowPlan, needsFlowShot, planFlowHook, planFlowScenes } from "./flowPlan";
+import { fallbackFlowShot, isFlowClip, needsFlowPlan, needsFlowShot, planFlowHook, planFlowScenes } from "./flowPlan";
 import { dropQueuedFlowClips, flowWorkerStatus } from "./flowWorker";
 import { growthBrief } from "./growthGoal";
 import { findChannelForMastermind, runMastermind } from "./mastermind";
@@ -505,7 +505,18 @@ async function tick(now: Date): Promise<TickResult> {
           const scene = project.scenes.find((s) => s.id === sceneId);
           const retries = Number(/^retry:(\d+)$/.exec(scene?.aiClipRequestId ?? "")?.[1] ?? 0);
           if (retries >= MAX_FLOW_RETRIES) exhausted.push(sceneId);
-          await queueSceneClip(sceneId, scene?.aiClipPrompt ?? undefined, "FLOW");
+          // Checkpoint: a prompt that failed twice is likely the problem (too long, refused, confusing),
+          // so from the second retry Flow gets a fresh, plain prompt built from the scene itself.
+          let prompt = scene?.aiClipPrompt ?? undefined;
+          if (retries >= 1) {
+            const fresh = await prisma.scene.findUnique({
+              where: { id: sceneId },
+              select: { sceneIndex: true, visualPrompt: true, narrationText: true, project: { select: { channel: { select: { mascotName: true, mascotLook: true } } } } },
+            });
+            const host = fresh?.project.channel;
+            if (fresh) prompt = fallbackFlowShot(fresh, host?.mascotName && host.mascotLook ? { name: host.mascotName, look: host.mascotLook } : null);
+          }
+          await queueSceneClip(sceneId, prompt, "FLOW");
           await prisma.scene.update({ where: { id: sceneId }, data: { aiClipRequestId: `retry:${retries >= MAX_FLOW_RETRIES ? 0 : retries + 1}` } });
         }
         if (exhausted.length) await prisma.videoProject.update({ where: { id: project.id }, data: { autopilotFailures: { increment: 1 } } });

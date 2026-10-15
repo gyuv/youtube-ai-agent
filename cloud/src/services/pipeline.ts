@@ -106,7 +106,15 @@ export async function generateProjectScript(projectId: string) {
     format: project.format,
     language: project.channel.language,
     targetAudience: project.channel.targetAudience,
-    channelPrompt: project.channel.defaultScriptPrompt,
+    channelPrompt: [
+      project.channel.defaultScriptPrompt,
+      // The host is a fixed character (also a Google Flow character): scripts must never re-imagine them.
+      project.channel.mascotName && project.channel.mascotLook
+        ? `The channel's host is ${project.channel.mascotName}: ${project.channel.mascotLook} Whenever ${project.channel.mascotName} appears in narration or image prompts, it is exactly this character, never a person or another animal.`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n\n") || null,
     performanceNotes: project.channel.learnFromAnalytics ? project.channel.performanceNotes : null,
     growth: growthBrief("script", project.channel.growthGoal, project.channel.mastermind ? project.channel.mastermindNotes : null),
   });
