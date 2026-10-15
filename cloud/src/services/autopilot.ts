@@ -520,7 +520,11 @@ async function tick(now: Date): Promise<TickResult> {
           await prisma.scene.update({ where: { id: sceneId }, data: { aiClipRequestId: `retry:${retries >= MAX_FLOW_RETRIES ? 0 : retries + 1}` } });
         }
         if (exhausted.length) await prisma.videoProject.update({ where: { id: project.id }, data: { autopilotFailures: { increment: 1 } } });
-        const message = `${label(project)}: asked Google Flow again for ${work.sceneIds.length} scene${work.sceneIds.length === 1 ? "" : "s"} that failed.`;
+        // The worker runs on the operator's PC; its error is the only clue the cloud gets, so it goes
+        // into the log where the health checks read it.
+        const failedScenes = await prisma.scene.findMany({ where: { id: { in: work.sceneIds } }, select: { aiClipError: true } });
+        const why = [...new Set(failedScenes.map((s) => s.aiClipError?.replace(/\s+/g, " ").slice(0, 220)).filter(Boolean))];
+        const message = `${label(project)}: asked Google Flow again for ${work.sceneIds.length} scene${work.sceneIds.length === 1 ? "" : "s"} that failed${why.length ? ` (worker said: ${why.join(" | ")})` : ""}.`;
         await log("info", "flowplan", message, ids);
         return { action: "planned", message, more: true, swept, ...ids };
       }

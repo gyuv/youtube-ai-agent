@@ -4,7 +4,7 @@ const db = vi.hoisted(() => ({
   channel: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   videoProject: { findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn(), create: vi.fn() },
   autopilotEvent: { create: vi.fn(), deleteMany: vi.fn() },
-  scene: { update: vi.fn(), findUnique: vi.fn(async () => ({ sceneIndex: 1, visualPrompt: "a lion", narrationText: "roar", project: { channel: { mascotName: null, mascotLook: null } } })) },
+  scene: { update: vi.fn(), findMany: vi.fn(async () => []), findUnique: vi.fn(async () => ({ sceneIndex: 1, visualPrompt: "a lion", narrationText: "roar", project: { channel: { mascotName: null, mascotLook: null } } })) },
 }));
 const pipeline = vi.hoisted(() => ({ dispatchCloudRender: vi.fn(), fillSceneAssets: vi.fn(), generateProjectScript: vi.fn() }));
 const planner = vi.hoisted(() => ({ proposeTopic: vi.fn() }));
