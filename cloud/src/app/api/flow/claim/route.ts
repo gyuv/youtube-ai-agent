@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { PipelineError } from "@/lib/errors";
 import { rejectUnlessBearer } from "@/lib/runnerAuth";
-import { FLOW_CLIP_CAP, recordFlowHeartbeat } from "@/services/flowWorker";
+import { FLOW_CLIP_CAP, nudgeAutopilotIfQuiet, recordFlowHeartbeat } from "@/services/flowWorker";
 import { claimNextClip } from "@/services/wan2gp";
 
 /**
@@ -21,6 +21,8 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const { creditsLeft } = Body.parse(await request.json().catch(() => ({})));
     await recordFlowHeartbeat(creditsLeft ?? null);
+    // Backup clock for GitHub's unreliable schedule; a failed nudge must never block the worker.
+    await nudgeAutopilotIfQuiet().catch((error) => console.warn("Autopilot nudge failed", error));
     if (creditsLeft !== undefined && creditsLeft < FLOW_CLIP_CAP) return new Response(null, { status: 204 });
     const job = await claimNextClip(new Date(), "FLOW");
     return job ? Response.json(job) : new Response(null, { status: 204 });

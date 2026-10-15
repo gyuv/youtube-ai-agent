@@ -12,7 +12,9 @@ name: Autopilot
 
 on:
   schedule:
-    - cron: "23 * * * *"
+    # Twice an hour: GitHub drops many scheduled starts under load. A spare start finds nothing
+    # due and ends in seconds. The Flow worker's poll also starts a run after an hour of quiet.
+    - cron: "23,53 * * * *"
   repository_dispatch:
     types: [autopilot]
   workflow_dispatch:

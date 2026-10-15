@@ -1,6 +1,7 @@
 import { optionalEnv, requireEnv } from "@/lib/env";
 import { PipelineError, errorMessage } from "@/lib/errors";
 import type { SpeechResult, WordTiming } from "./ttsGenerator";
+import { geminiApiKeys } from "./gemini";
 
 /**
  * Gemini text-to-speech: the 30 voices Google Flow narrates with, on the free AI Studio tier, using
@@ -74,12 +75,28 @@ export async function synthesizeGemini(text: string, voiceName: string, voice: s
 const NO_AUDIO = "Gemini TTS returned no audio";
 
 async function synthesizeOnce(input: string, text: string, voiceName: string, voice: string, timeoutMs: number): Promise<SpeechResult> {
+  const keys = geminiApiKeys();
+  if (!keys.length) requireEnv("GEMINI_API_KEY");
+  let lastError: unknown;
+  for (const key of keys) {
+    try {
+      return await synthesizeWithKey(key, input, text, voiceName, voice, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      // A spent free quota (429) moves on to the next key; anything else is final.
+      if (!(error instanceof PipelineError && error.message.startsWith("Gemini TTS returned 429"))) throw error;
+    }
+  }
+  throw lastError;
+}
+
+async function synthesizeWithKey(key: string, input: string, text: string, voiceName: string, voice: string, timeoutMs: number): Promise<SpeechResult> {
   let res: Response;
   try {
     res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL()}:generateContent`, {
       method: "POST",
       // The key goes in a header, never the URL, so it can't end up in logs.
-      headers: { "content-type": "application/json", "x-goog-api-key": requireEnv("GEMINI_API_KEY") },
+      headers: { "content-type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({
         contents: [{ parts: [{ text: input }] }],
         generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } } },
