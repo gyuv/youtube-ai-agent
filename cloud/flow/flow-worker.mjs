@@ -155,6 +155,9 @@ async function runJob(job, book) {
       lastError = error.message;
     }
     done = null;
+    // Flow made (and charged for) the clip, but flow-mcp couldn't find it on the page. Generating
+    // again would only pay twice; report it so the studio retries later.
+    if (/locator\.waitFor|Timeout \d+ms exceeded/i.test(lastError)) break;
     if (i < tries.length - 1) {
       log(`Flow hiccup (${lastError.slice(0, 160)}); trying again…`);
       await sleep(20);
