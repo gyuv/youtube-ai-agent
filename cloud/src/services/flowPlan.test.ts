@@ -78,7 +78,7 @@ describe("Flow shot list", () => {
 describe("fallbackFlowShot", () => {
   it("builds a cinematic shot from the scene prompt, with the host only in scene 0", () => {
     const host = { name: "Kittu", look: "a small brown squirrel" };
-    expect(fallbackFlowShot({ sceneIndex: 0, visualPrompt: "a lion roaring in the jungle", narrationText: "x" }, host)).toContain("Kittu, a small brown squirrel");
+    expect(fallbackFlowShot({ sceneIndex: 0, visualPrompt: "a lion roaring in the jungle", narrationText: "x" }, host)).toContain("Kittu appears in the shot");
     const later = fallbackFlowShot({ sceneIndex: 2, visualPrompt: null, narrationText: "an elephant trumpets" }, host);
     expect(later).toContain("an elephant trumpets");
     expect(later).not.toContain("Kittu");

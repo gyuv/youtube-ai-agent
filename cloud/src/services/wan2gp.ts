@@ -113,6 +113,23 @@ export interface ClipJob {
   upload: SignedUpload;
 }
 
+/** Flow prompts longer than this make flow-mcp lose track of the finished clip (it finds it by its prompt). */
+export const MAX_FLOW_PROMPT_CHARS = 450;
+
+/**
+ * Keep a Flow prompt short: drop the host's long look description (the attached Flow character
+ * already carries it) and cut at a word boundary.
+ */
+export function flowPrompt(prompt: string, mascotLook?: string | null): string {
+  let text = prompt;
+  const look = mascotLook?.trim();
+  if (look && look.length > 20) text = text.split(look).join("");
+  text = text.replace(/\s+/g, " ").replace(/\s+([,.])/g, "$1").replace(/,\s*,/g, ",").trim();
+  if (text.length <= MAX_FLOW_PROMPT_CHARS) return text;
+  const cut = text.slice(0, MAX_FLOW_PROMPT_CHARS);
+  return cut.slice(0, cut.lastIndexOf(" ") > 200 ? cut.lastIndexOf(" ") : MAX_FLOW_PROMPT_CHARS).replace(/[,;:\s]+$/, "") + ".";
+}
+
 function claimableWhere(engine: WorkerEngine, now: Date) {
   const stale = new Date(now.getTime() - CLAIM_TTL_MS);
   return {
@@ -153,7 +170,9 @@ export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WA
     return {
       sceneId: scene.id,
       claimedAt: now.toISOString(),
-      prompt: scene.aiClipPrompt?.trim() || (engine === "PINTEREST" ? scene.stockQuery?.trim() || scene.narrationText : clipPromptFor(scene)),
+      prompt: ((p: string) => (engine === "FLOW" ? flowPrompt(p, scene.project.channel.mascotLook) : p))(
+        scene.aiClipPrompt?.trim() || (engine === "PINTEREST" ? scene.stockQuery?.trim() || scene.narrationText : clipPromptFor(scene)),
+      ),
       ...clipResolution(scene.project.format),
       durationSeconds: scene.durationSeconds,
       // Flow-only channels: Flow creates the visual from the prompt; an earlier image is never used.

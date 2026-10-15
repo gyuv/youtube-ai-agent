@@ -173,7 +173,8 @@ export function needsFlowShot(scene: ShotScene): boolean {
 /** A cinematic Flow prompt built without Gemini, from the scene's own visual prompt and narration. */
 export function fallbackFlowShot(scene: { sceneIndex: number; visualPrompt: string | null; narrationText: string }, mascot: { name: string; look: string } | null): string {
   const subject = scene.visualPrompt?.trim() || scene.narrationText;
-  const host = mascot && scene.sceneIndex === 0 ? ` ${mascot.name}, ${mascot.look}, appears in the shot.` : "";
+  // The host's look travels as the attached Flow character, so only the name goes in the prompt.
+  const host = mascot && scene.sceneIndex === 0 ? ` ${mascot.name} appears in the shot.` : "";
   return `Cinematic 3D animated shot for young children: ${subject}.${host} Bright, colourful Pixar-style animation, soft lighting, gentle camera movement, no text on screen.`.slice(0, 1500);
 }
 

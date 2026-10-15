@@ -133,3 +133,14 @@ describe("completeClip", () => {
     expect(db.scene.updateMany).not.toHaveBeenCalled();
   });
 });
+
+describe("flowPrompt", () => {
+  it("drops the host's look (the Flow character carries it) and stays short", async () => {
+    const { flowPrompt, MAX_FLOW_PROMPT_CHARS } = await import("./wan2gp");
+    const look = "A stylized chubby 3D cartoon baby squirrel with smooth glossy surfaces and a turquoise waistcoat";
+    const p = flowPrompt(`Kittu waves at a Pongal pot. Kittu, ${look}, appears in the shot. ${"Bright sunny village. ".repeat(40)}`, look);
+    expect(p).not.toContain("glossy surfaces");
+    expect(p.length).toBeLessThanOrEqual(MAX_FLOW_PROMPT_CHARS + 1);
+    expect(p.startsWith("Kittu waves at a Pongal pot.")).toBe(true);
+  });
+});
