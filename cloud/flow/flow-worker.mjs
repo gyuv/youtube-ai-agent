@@ -172,6 +172,7 @@ async function runJob(job, book) {
 }
 
 let lastIdleLog = 0;
+let failStreak = 0;
 
 async function tick() {
   const book = ledger();
@@ -203,9 +204,18 @@ async function tick() {
     const credits = await runJob(job, book);
     const res = await report(job, { ok: true });
     log(`Done: ${credits ?? "?"} credits, ${ledger().spent}/${DAILY_CREDITS} used today.${res.applied ? "" : " (The studio had moved on; clip not applied.)"}`);
+    failStreak = 0;
   } catch (error) {
     log(`Failed: ${error.message}`);
+    failStreak++;
     await report(job, { ok: false, error: String(error.message).slice(0, 1900) }).catch((e) => log(`Couldn't report the failure: ${e.message}`));
+  }
+  // Checkpoint: several failures in a row usually mean Flow itself is unwell (signed out, busy,
+  // page changed). Pause instead of spending credits on clips that will fail the same way.
+  if (failStreak >= 3) {
+    log(`${failStreak} clips failed in a row; pausing 30 minutes to save credits. Check the flow-mcp Chrome window.`);
+    failStreak = 0;
+    return 30 * 60;
   }
   return 5;
 }
