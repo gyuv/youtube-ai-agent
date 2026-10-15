@@ -500,6 +500,9 @@ async function tick(now: Date): Promise<TickResult> {
       if (work.kind === "flowretry") {
         // Flow is flaky, so a failed clip is simply asked for again: each scene gets its own retries
         // (counted on the scene), and only a scene that keeps failing costs the video an attempt.
+        // Read the worker's errors before re-queuing: queueing a clip clears them.
+        const failedScenes = await prisma.scene.findMany({ where: { id: { in: work.sceneIds } }, select: { aiClipError: true } });
+        const why = [...new Set(failedScenes.map((s) => s.aiClipError?.replace(/\s+/g, " ").slice(0, 220)).filter(Boolean))];
         const exhausted: string[] = [];
         for (const sceneId of work.sceneIds) {
           const scene = project.scenes.find((s) => s.id === sceneId);
@@ -522,8 +525,6 @@ async function tick(now: Date): Promise<TickResult> {
         if (exhausted.length) await prisma.videoProject.update({ where: { id: project.id }, data: { autopilotFailures: { increment: 1 } } });
         // The worker runs on the operator's PC; its error is the only clue the cloud gets, so it goes
         // into the log where the health checks read it.
-        const failedScenes = await prisma.scene.findMany({ where: { id: { in: work.sceneIds } }, select: { aiClipError: true } });
-        const why = [...new Set(failedScenes.map((s) => s.aiClipError?.replace(/\s+/g, " ").slice(0, 220)).filter(Boolean))];
         const message = `${label(project)}: asked Google Flow again for ${work.sceneIds.length} scene${work.sceneIds.length === 1 ? "" : "s"} that failed${why.length ? ` (worker said: ${why.join(" | ")})` : ""}.`;
         await log("info", "flowplan", message, ids);
         return { action: "planned", message, more: true, swept, ...ids };
