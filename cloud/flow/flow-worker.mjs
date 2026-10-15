@@ -157,7 +157,13 @@ async function runJob(job, book) {
     done = null;
     // Flow made (and charged for) the clip, but flow-mcp couldn't find it on the page. Generating
     // again would only pay twice; report it so the studio retries later.
-    if (/locator\.waitFor|Timeout \d+ms exceeded/i.test(lastError)) break;
+    if (/locator\.waitFor|Timeout \d+ms exceeded|no longer in the grid/i.test(lastError)) {
+      // The clip is usually sitting finished in Flow: fetch it by its title (the prompt's start), which
+      // costs no credits, instead of paying for it again.
+      const recovered = await recoverClip(job.prompt);
+      if (recovered) done = { status: "done", files: recovered, credits: 0 };
+      break;
+    }
     if (i < tries.length - 1) {
       log(`Flow hiccup (${lastError.slice(0, 160)}); trying again…`);
       await sleep(20);
@@ -169,6 +175,24 @@ async function runJob(job, book) {
   const put = await fetch(job.upload.url, { method: job.upload.method, headers: job.upload.headers, body: readFileSync(file), signal: AbortSignal.timeout(300_000) });
   if (!put.ok) throw new Error(`Upload to storage failed (${put.status}).`);
   return done.credits;
+}
+
+/** Fetch a clip Flow already made (and charged for) by its title prefix; flow_download is free. */
+async function recoverClip(prompt) {
+  for (const len of [100, 70]) {
+    try {
+      await sleep(15);
+      const res = await flow("download", { project: "lumen-recovered", assets: [prompt.slice(0, len).trim()] });
+      const files = (res.files ?? []).filter((f) => f.endsWith(".mp4"));
+      if (files.length) {
+        log(`Recovered the finished clip from Flow without spending credits again.`);
+        return files;
+      }
+    } catch (error) {
+      log(`Couldn't recover the clip yet (${String(error.message).slice(0, 120)}).`);
+    }
+  }
+  return null;
 }
 
 let lastIdleLog = 0;
