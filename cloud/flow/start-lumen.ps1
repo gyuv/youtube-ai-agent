@@ -72,8 +72,10 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 # 3. Keep the PC awake while this window is open.
 try {
   Add-Type -Namespace Lumen -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags);' -ErrorAction Stop
-  [Lumen.Power]::SetThreadExecutionState([uint32]2147483649) | Out-Null # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
-  Say "The PC will stay awake while this window is open."
+  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED: Chrome stops drawing Flow's page when the
+  # screen sleeps or locks, and then finished clips can't be found, so the screen stays on too.
+  [Lumen.Power]::SetThreadExecutionState([uint32]2147483651) | Out-Null
+  Say "The PC and screen will stay awake while this window is open."
 } catch {
   Say "Couldn't keep the PC awake automatically; set Sleep to Never in Windows power settings." "Yellow"
 }
@@ -92,7 +94,29 @@ if (-not (Test-Path (Join-Path $FlowMcp "package.json"))) {
   Say "Sign in to Google in the Chrome window that opens, open https://labs.google/flow once, then close it." "Yellow"
   npm run login; Pop-Location
 }
+# flow-mcp's Chrome. Started here (flow-mcp attaches to it) so Chrome keeps drawing the Flow page while the
+# window is minimized or covered: otherwise Flow's grid never shows the finished clip and every clip fails
+# with "locator.waitFor: Timeout" after it was already paid for.
+function ChromeUp {
+  try { $null = Invoke-RestMethod "http://127.0.0.1:9333/json/version" -TimeoutSec 2 -ErrorAction Stop; $true } catch { $false }
+}
+function StartFlowChrome {
+  if (ChromeUp) { return }
+  $chrome = @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+  ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+  if (-not $chrome) { Say "Chrome not found; flow-mcp will start its own." "Yellow"; return }
+  $profileDir = Join-Path $HOME ".flow-mcp\chrome-profile"
+  Start-Process $chrome -ArgumentList "--user-data-dir=`"$profileDir`"", "--remote-debugging-port=9333", "--no-first-run", "--no-default-browser-check",
+    "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "https://labs.google/fx/tools/flow" | Out-Null
+  for ($i = 0; $i -lt 20 -and -not (ChromeUp); $i++) { Start-Sleep 1 }
+  Say "Started Flow's Chrome so it keeps working while minimized." "Green"
+}
+
 function StartFlowMcp {
+  StartFlowChrome
   if (FlowMcpUp) { return }
   Say "Starting flow-mcp in its own window..."
   Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$FlowMcp'; npm run studio" | Out-Null
