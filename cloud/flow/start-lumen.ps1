@@ -123,8 +123,12 @@ function PatchFlowMcp {
   if (-not (Test-Path $file)) { return }
   $code = Get-Content $file -Raw
   $fixed = $code
-  # Flow now shows two "N credits" links, which made flow-mcp's strict lookup fail before every clip.
-  $fixed = $fixed.Replace('getByRole("link", { name: /credits?$/ }).innerText()', 'getByRole("link", { name: /credits?$/ }).first().innerText()')
+  # Flow now shows two "credits" links: the clip's cost ("20 credits") and an "Add AI credits" button, which
+  # made flow-mcp's strict lookup fail before every clip. Pick the one that holds a number (also replaces the
+  # earlier .first() fix, which picked the button).
+  $costLink = 'getByRole("link", { name: /credits?$/ }).filter({ hasText: /\d/ }).first().innerText()'
+  $fixed = $fixed.Replace('getByRole("link", { name: /credits?$/ }).first().innerText()', $costLink)
+  $fixed = $fixed.Replace('getByRole("link", { name: /credits?$/ }).innerText()', $costLink)
   if ($fixed -eq $code) { return }
   Set-Content -Path $file -Value $fixed -NoNewline
   Say "Applied a fix for a Flow page change to flow-mcp; rebuilding it..." "Yellow"
