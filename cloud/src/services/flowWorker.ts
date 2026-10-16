@@ -18,12 +18,24 @@ export const FLOW_ONLINE_MS = 15 * 60 * 1000;
 /** Most a Flow clip may cost; also the least a worker must have left to take one. */
 export const FLOW_CLIP_CAP = 15;
 
-export async function recordFlowHeartbeat(creditsLeft: number | null, now: Date = new Date()) {
+/** Heartbeat key of a worker: the shared one, or a channel's own worker ("FLOW:Juu-Muu"). */
+export const flowHeartbeatKey = (channel?: string | null) => (channel ? `${FLOW_ENGINE}:${channel}` : FLOW_ENGINE);
+/** A dedicated worker seen within this long keeps its channel away from the shared worker. */
+export const DEDICATED_WORKER_MS = 7 * 24 * 60 * 60 * 1000;
+
+export async function recordFlowHeartbeat(creditsLeft: number | null, now: Date = new Date(), channel?: string | null) {
+  const engine = flowHeartbeatKey(channel);
   await prisma.workerHeartbeat.upsert({
-    where: { engine: FLOW_ENGINE },
-    create: { engine: FLOW_ENGINE, seenAt: now, creditsLeft },
+    where: { engine },
+    create: { engine, seenAt: now, creditsLeft },
     update: { seenAt: now, creditsLeft },
   });
+}
+
+/** Channels that have their own Flow worker (each with its own Google account and credits). */
+export async function dedicatedFlowChannels(now: Date = new Date()): Promise<string[]> {
+  const beats = await prisma.workerHeartbeat.findMany({ where: { engine: { startsWith: `${FLOW_ENGINE}:` }, seenAt: { gt: new Date(now.getTime() - DEDICATED_WORKER_MS) } } });
+  return beats.map((b) => b.engine.slice(FLOW_ENGINE.length + 1));
 }
 
 export interface FlowWorkerStatus {
@@ -34,14 +46,17 @@ export interface FlowWorkerStatus {
   creditsLeft: number | null;
 }
 
+/** The shared worker, or with several workers, whether any of them can take a clip now. */
 export async function flowWorkerStatus(now: Date = new Date()): Promise<FlowWorkerStatus> {
-  const beat = await prisma.workerHeartbeat.findUnique({ where: { engine: FLOW_ENGINE } });
-  const online = Boolean(beat && now.getTime() - beat.seenAt.getTime() <= FLOW_ONLINE_MS);
+  const beats = await prisma.workerHeartbeat.findMany({ where: { OR: [{ engine: FLOW_ENGINE }, { engine: { startsWith: `${FLOW_ENGINE}:` } }] } });
+  const live = beats.filter((b) => now.getTime() - b.seenAt.getTime() <= FLOW_ONLINE_MS);
+  const main = beats.find((b) => b.engine === FLOW_ENGINE) ?? beats[0];
+  const shown = live.find((b) => b.engine === FLOW_ENGINE) ?? live[0] ?? main;
   return {
-    online,
-    ready: online && (beat!.creditsLeft === null || beat!.creditsLeft >= FLOW_CLIP_CAP),
-    seenAt: beat?.seenAt ?? null,
-    creditsLeft: beat?.creditsLeft ?? null,
+    online: live.length > 0,
+    ready: live.some((b) => b.creditsLeft === null || b.creditsLeft >= FLOW_CLIP_CAP),
+    seenAt: shown?.seenAt ?? null,
+    creditsLeft: shown?.creditsLeft ?? null,
   };
 }
 
