@@ -115,7 +115,27 @@ function StartFlowChrome {
   Say "Started Flow's Chrome so it keeps working while minimized." "Green"
 }
 
+# Small fixes to flow-mcp for changes Google made to the Flow page (the operator approved applying these
+# automatically), applied to the local copy on every start until flow-mcp ships them itself. Each is a
+# fixed, reviewed text replacement; flow-mcp is rebuilt and restarted only when one of them changed something.
+function PatchFlowMcp {
+  $file = Join-Path $FlowMcp "src\flow.ts"
+  if (-not (Test-Path $file)) { return }
+  $code = Get-Content $file -Raw
+  $fixed = $code
+  # Flow now shows two "N credits" links, which made flow-mcp's strict lookup fail before every clip.
+  $fixed = $fixed.Replace('getByRole("link", { name: /credits?$/ }).innerText()', 'getByRole("link", { name: /credits?$/ }).first().innerText()')
+  if ($fixed -eq $code) { return }
+  Set-Content -Path $file -Value $fixed -NoNewline
+  Say "Applied a fix for a Flow page change to flow-mcp; rebuilding it..." "Yellow"
+  Push-Location $FlowMcp; npm run build; Pop-Location
+  # A flow-mcp that is already running still has the old code: stop it so it restarts with the fix.
+  Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+  Start-Sleep 2
+}
+
 function StartFlowMcp {
+  PatchFlowMcp
   StartFlowChrome
   if (FlowMcpUp) { return }
   Say "Starting flow-mcp in its own window..."
