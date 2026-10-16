@@ -3,6 +3,7 @@ import { PipelineError } from "@/lib/errors";
 import {
   GEMINI_RESPONSE_SCHEMA,
   buildChapters,
+  buildSystemInstruction,
   estimateSpeechSeconds,
   generateScript,
   parseScriptResponse,
@@ -160,5 +161,11 @@ describe("buildChapters", () => {
 
   it("returns nothing when YouTube's chapter rules can't be met", () => {
     expect(buildChapters(SCRIPT, [3, 4, 4, 3])).toEqual([]);
+  });
+});
+
+describe("maxSections", () => {
+  it("asks for the capped section count", () => {
+    expect(buildSystemInstruction({ topic: "t", niche: "kids", format: "SHORT", maxSections: 2 })).toContain("exactly 2 sections");
   });
 });

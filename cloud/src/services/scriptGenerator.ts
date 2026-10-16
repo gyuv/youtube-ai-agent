@@ -73,6 +73,8 @@ export interface ScriptRequest {
   performanceNotes?: string | null;
   /** Growth goal brief and the Growth Lab mastermind's strategy (see growthGoal.ts). */
   growth?: string | null;
+  /** Cap on body sections (scenes = hook + sections + CTA). Flow-only channels use it to save credits. */
+  maxSections?: number;
 }
 
 export interface GeneratedScript {
@@ -166,6 +168,7 @@ const FORMAT_BRIEF: Record<VideoFormat, string> = {
 
 export function buildSystemInstruction(req: ScriptRequest): string {
   return [
+    ...(req.maxSections ? [`Write exactly ${req.maxSections} sections (this overrides the section count below); keep the full story in them.`] : []),
     `You are an expert scriptwriter for a faceless YouTube channel in the "${req.niche}" niche.`,
     "Write for a neural text-to-speech voiceover: short, conversational sentences; no stage directions, speaker labels, markdown, emojis or URLs.",
     "Each beat is one continuous shot: its narration is spoken over a single visual.",
@@ -245,6 +248,8 @@ export async function generateScript(
     parse: parseScriptResponse,
     ...options,
   });
+  // Enforce the cap even if the model wrote more: every scene is a paid Flow clip on Flow-only channels.
+  if (req.maxSections && script.sections.length > req.maxSections) script.sections = script.sections.slice(0, req.maxSections);
   const scenes = planScenes(script);
   return {
     model,
