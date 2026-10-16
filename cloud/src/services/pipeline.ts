@@ -117,6 +117,8 @@ export async function generateProjectScript(projectId: string) {
       .join("\n\n") || null,
     performanceNotes: project.channel.learnFromAnalytics ? project.channel.performanceNotes : null,
     growth: growthBrief("script", project.channel.growthGoal, project.channel.mastermind ? project.channel.mastermindNotes : null),
+    // Flow-only Shorts: hook + 2 sections + CTA = 4 Flow clips per video, so the monthly credits stretch further.
+    maxSections: project.channel.flowOnly && project.format === "SHORT" ? FLOW_ONLY_SECTIONS : undefined,
   });
 
   return prisma.$transaction(async (tx) => {
@@ -214,6 +216,9 @@ export interface VisualRequest {
 const IMAGE_EXTENSIONS: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 
 /** Shown when anything but Google Flow tries to make a visual on a Flow-only channel. */
+/** Body sections in a Flow-only Short (4 Flow clips with the hook and CTA). */
+export const FLOW_ONLY_SECTIONS = 2;
+
 export const FLOW_ONLY_VISUALS =
   "This channel is Google Flow only: every visual is a Google Flow clip, so AI images, stock, Pinterest and other video engines are turned off. Queue the scene with Google Flow instead.";
 
