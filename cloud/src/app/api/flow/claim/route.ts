@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { PipelineError } from "@/lib/errors";
 import { rejectUnlessBearer } from "@/lib/runnerAuth";
-import { FLOW_CLIP_CAP, nudgeAutopilotIfQuiet, recordFlowHeartbeat } from "@/services/flowWorker";
+import { FLOW_CLIP_CAP, dedicatedFlowChannels, nudgeAutopilotIfQuiet, recordFlowHeartbeat } from "@/services/flowWorker";
 import { claimNextClip } from "@/services/wan2gp";
 
 /**
@@ -12,19 +12,21 @@ import { claimNextClip } from "@/services/wan2gp";
  */
 export const dynamic = "force-dynamic";
 
-const Body = z.object({ creditsLeft: z.number().int().min(0).max(10_000).optional() }).catch({});
+// channel: a dedicated worker (its own Google account) names the one channel it serves.
+const Body = z.object({ creditsLeft: z.number().int().min(0).max(10_000).optional(), channel: z.string().trim().min(1).max(100).optional() }).catch({});
 
 export async function POST(request: Request): Promise<Response> {
   const denied = rejectUnlessBearer(request, "FLOW_WORKER_SECRET");
   if (denied) return denied;
 
   try {
-    const { creditsLeft } = Body.parse(await request.json().catch(() => ({})));
-    await recordFlowHeartbeat(creditsLeft ?? null);
+    const { creditsLeft, channel } = Body.parse(await request.json().catch(() => ({})));
+    await recordFlowHeartbeat(creditsLeft ?? null, new Date(), channel);
     // Backup clock for GitHub's unreliable schedule; a failed nudge must never block the worker.
     await nudgeAutopilotIfQuiet().catch((error) => console.warn("Autopilot nudge failed", error));
     if (creditsLeft !== undefined && creditsLeft < FLOW_CLIP_CAP) return new Response(null, { status: 204 });
-    const job = await claimNextClip(new Date(), "FLOW");
+    // The shared worker leaves channels with their own worker alone, so each account only spends on its channel.
+    const job = await claimNextClip(new Date(), "FLOW", channel ? { only: channel } : { except: await dedicatedFlowChannels() });
     return job ? Response.json(job) : new Response(null, { status: 204 });
   } catch (error) {
     if (error instanceof PipelineError) {

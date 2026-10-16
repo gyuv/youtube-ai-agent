@@ -32,6 +32,8 @@ const DURATION = env("FLOW_DURATION", ""); // 4, 6, 8 or 10 (Omni models only)
 const RESOLUTION = env("FLOW_RESOLUTION", ""); // 360p or 720p (Omni models only)
 const LEDGER = join(FLOW_HOME, "lumen-ledger.json");
 const ONCE = process.argv.includes("--once");
+// A dedicated worker (own Google account) serves one channel; empty serves every channel without one.
+const CHANNEL = env("FLOW_CHANNEL", "");
 const FLOW_MCP_DIR = env("FLOW_MCP_DIR", join(homedir(), "flow-mcp"));
 
 if (!LUMEN_URL || !SECRET) {
@@ -209,7 +211,7 @@ async function tick() {
   const left = DAILY_CREDITS - book.spent;
   if (left < MAX_CREDITS) {
     // Still check in, so the studio knows not to plan clips today and renders with stills on time.
-    await lumen("/api/flow/claim", { creditsLeft: Math.max(0, left) });
+    await lumen("/api/flow/claim", { creditsLeft: Math.max(0, left), ...(CHANNEL ? { channel: CHANNEL } : {}) });
     log(`Daily budget used (${book.spent}/${DAILY_CREDITS} credits; a clip needs up to ${MAX_CREDITS}). Resuming tomorrow.`);
     return 10 * 60;
   }
@@ -219,7 +221,7 @@ async function tick() {
     log(problem);
     return POLL_SECONDS;
   }
-  const job = await lumen("/api/flow/claim", { creditsLeft: left });
+  const job = await lumen("/api/flow/claim", { creditsLeft: left, ...(CHANNEL ? { channel: CHANNEL } : {}) });
   if (!job) {
     // Say so now and then, so a quiet window doesn't look stuck.
     if (Date.now() - lastIdleLog > 10 * 60_000) {
@@ -299,7 +301,7 @@ if (patchFlowMcp()) {
 }
 log(`flow-mcp: ${fixStatus}.`);
 
-log(`Lumen Flow worker: ${LUMEN_URL}, cap ${MAX_CREDITS}/clip, ${DAILY_CREDITS}/day.`);
+log(`Lumen Flow worker${CHANNEL ? ` for ${CHANNEL}` : ""}: ${LUMEN_URL}, cap ${MAX_CREDITS}/clip, ${DAILY_CREDITS}/day.`);
 for (;;) {
   const wait = await tick().catch((e) => (log(`Error: ${e.message}`), POLL_SECONDS));
   if (ONCE) break;

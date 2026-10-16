@@ -130,10 +130,14 @@ export function flowPrompt(prompt: string, mascotLook?: string | null): string {
   return cut.slice(0, cut.lastIndexOf(" ") > 200 ? cut.lastIndexOf(" ") : MAX_FLOW_PROMPT_CHARS).replace(/[,;:\s]+$/, "") + ".";
 }
 
-function claimableWhere(engine: WorkerEngine, now: Date) {
+/** Which channels a Flow worker serves: one channel (a dedicated worker), or every channel except some. */
+export type ChannelScope = { only: string } | { except: string[] } | undefined;
+
+function claimableWhere(engine: WorkerEngine, now: Date, scope?: ChannelScope) {
   const stale = new Date(now.getTime() - CLAIM_TTL_MS);
+  const channel = !scope ? undefined : "only" in scope ? { name: scope.only } : scope.except.length ? { name: { notIn: scope.except } } : undefined;
   return {
-    project: { status: { in: CLAIMABLE } },
+    project: { status: { in: CLAIMABLE }, ...(channel ? { channel } : {}) },
     locked: false,
     // Each worker claims only its own engine's requests; Muapi clips are polled by the app itself.
     AND: [
@@ -149,8 +153,8 @@ export async function countClaimableClips(engine: WorkerEngine, now = new Date()
 }
 
 /** Hand the oldest waiting request to a worker, or null when there is nothing to do. */
-export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WAN2GP"): Promise<ClipJob | null> {
-  const where = claimableWhere(engine, now);
+export async function claimNextClip(now = new Date(), engine: WorkerEngine = "WAN2GP", scope?: ChannelScope): Promise<ClipJob | null> {
+  const where = claimableWhere(engine, now, scope);
 
   // Two workers can race for the same row; the conditional update lets exactly one win.
   for (let attempt = 0; attempt < 3; attempt++) {

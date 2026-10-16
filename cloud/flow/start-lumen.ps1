@@ -11,7 +11,23 @@
 
 # npm and node write warnings to stderr; in Windows PowerShell 5 "Stop" would turn those into crashes.
 $ErrorActionPreference = "Continue"
-$Log = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "start-lumen.log"
+
+# -Channel "Juu-Muu": a second, separate Flow setup for one channel, signed in to that channel's own Google
+# account. It gets its own Chrome profile, flow-mcp data, ports, credit budget and worker, so each account only
+# makes clips for its own channel. Without -Channel this is the shared worker for every other Flow channel.
+$Channel = ""
+$ci = [Array]::IndexOf([string[]]$args, "-Channel")
+if ($ci -ge 0 -and $ci + 1 -lt $args.Count) { $Channel = "$($args[$ci + 1])".Trim() }
+if ($Channel) {
+  $Slug = ($Channel.ToLower() -replace '[^a-z0-9]+', '-').Trim('-')
+  $FlowPort = 8788; $CdpPort = 9334; $FlowHome = Join-Path $HOME ".flow-mcp-$Slug"
+} else {
+  $Slug = ""; $FlowPort = 8787; $CdpPort = 9333; $FlowHome = Join-Path $HOME ".flow-mcp"
+}
+$env:FLOW_CHANNEL = $Channel; $env:FLOW_MCP_PORT = "$FlowPort"; $env:FLOW_MCP_CDP_PORT = "$CdpPort"; $env:FLOW_MCP_HOME = $FlowHome
+$Suffix = if ($Slug) { "-$Slug" } else { "" }
+try { $Host.UI.RawUI.WindowTitle = "Lumen Flow$(if ($Channel) { " - $Channel" })" } catch {}
+$Log = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "start-lumen$Suffix.log"
 try { Start-Transcript -Path $Log -Append | Out-Null } catch {}
 # Never close silently: show what went wrong and wait, so the window can be read.
 trap {
@@ -21,7 +37,7 @@ trap {
   exit 1
 }
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Worker = Join-Path $Here "flow-worker.mjs"
+$Worker = Join-Path $Here "flow-worker$Suffix.mjs"
 $WorkerUrl = "https://raw.githubusercontent.com/gyuv/youtube-ai-agent/claude/epic-cannon-4u9o4s/cloud/flow/flow-worker.mjs"
 $FlowMcp = Join-Path $HOME "flow-mcp"
 
@@ -82,7 +98,7 @@ try {
 
 # 4. flow-mcp: install once if missing, then make sure its studio is running.
 function FlowMcpUp {
-  try { (Invoke-RestMethod "http://127.0.0.1:8787/api/health" -TimeoutSec 3 -ErrorAction Stop).name -eq "flow-mcp" } catch { $false }
+  try { (Invoke-RestMethod "http://127.0.0.1:$FlowPort/api/health" -TimeoutSec 3 -ErrorAction Stop).name -eq "flow-mcp" } catch { $false }
 }
 if (-not (Test-Path (Join-Path $FlowMcp "package.json"))) {
   Say "Installing flow-mcp (first run only)..."
@@ -98,7 +114,7 @@ if (-not (Test-Path (Join-Path $FlowMcp "package.json"))) {
 # window is minimized or covered: otherwise Flow's grid never shows the finished clip and every clip fails
 # with "locator.waitFor: Timeout" after it was already paid for.
 function ChromeUp {
-  try { $null = Invoke-RestMethod "http://127.0.0.1:9333/json/version" -TimeoutSec 2 -ErrorAction Stop; $true } catch { $false }
+  try { $null = Invoke-RestMethod "http://127.0.0.1:$CdpPort/json/version" -TimeoutSec 2 -ErrorAction Stop; $true } catch { $false }
 }
 function StartFlowChrome {
   if (ChromeUp) { return }
@@ -108,8 +124,8 @@ function StartFlowChrome {
     "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
   ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
   if (-not $chrome) { Say "Chrome not found; flow-mcp will start its own." "Yellow"; return }
-  $profileDir = Join-Path $HOME ".flow-mcp\chrome-profile"
-  Start-Process $chrome -ArgumentList "--user-data-dir=`"$profileDir`"", "--remote-debugging-port=9333", "--no-first-run", "--no-default-browser-check",
+  $profileDir = Join-Path $FlowHome "chrome-profile"
+  Start-Process $chrome -ArgumentList "--user-data-dir=`"$profileDir`"", "--remote-debugging-port=$CdpPort", "--no-first-run", "--no-default-browser-check",
     "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "https://labs.google/fx/tools/flow" | Out-Null
   for ($i = 0; $i -lt 20 -and -not (ChromeUp); $i++) { Start-Sleep 1 }
   Say "Started Flow's Chrome so it keeps working while minimized." "Green"
@@ -134,7 +150,7 @@ function PatchFlowMcp {
   Say "Applied a fix for a Flow page change to flow-mcp; rebuilding it..." "Yellow"
   Push-Location $FlowMcp; npm run build; Pop-Location
   # A flow-mcp that is already running still has the old code: stop it so it restarts with the fix.
-  Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+  Get-NetTCPConnection -LocalPort $FlowPort -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
   Start-Sleep 2
 }
 
@@ -153,10 +169,10 @@ StartFlowMcp
 # Google sign-in: if flow-mcp reports it's signed out, open the sign-in window once and wait for it.
 function EnsureSignedIn {
   if (-not (FlowMcpUp)) { return }
-  $tokenFile = Join-Path $HOME ".flow-mcp\token"
+  $tokenFile = Join-Path $FlowHome "token"
   if (-not (Test-Path $tokenFile)) { return }
   try {
-    $status = Invoke-RestMethod "http://127.0.0.1:8787/api/status" -Method Post -ContentType "application/json" -Body '{"detailed":false}' -Headers @{ "x-flow-token" = (Get-Content $tokenFile -Raw).Trim() } -TimeoutSec 20 -ErrorAction Stop
+    $status = Invoke-RestMethod "http://127.0.0.1:$FlowPort/api/status" -Method Post -ContentType "application/json" -Body '{"detailed":false}' -Headers @{ "x-flow-token" = (Get-Content $tokenFile -Raw).Trim() } -TimeoutSec 20 -ErrorAction Stop
   } catch { return }
   if ($status.flow -and $status.flow.signedIn -eq $false) {
     Say "Google is signed out of Flow. A Chrome window opens: sign in, open https://labs.google/flow, then close that window." "Yellow"
