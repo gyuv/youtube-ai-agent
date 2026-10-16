@@ -15,6 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -31,6 +32,7 @@ const DURATION = env("FLOW_DURATION", ""); // 4, 6, 8 or 10 (Omni models only)
 const RESOLUTION = env("FLOW_RESOLUTION", ""); // 360p or 720p (Omni models only)
 const LEDGER = join(FLOW_HOME, "lumen-ledger.json");
 const ONCE = process.argv.includes("--once");
+const FLOW_MCP_DIR = env("FLOW_MCP_DIR", join(homedir(), "flow-mcp"));
 
 if (!LUMEN_URL || !SECRET) {
   console.error("Set LUMEN_URL (your studio's https URL) and FLOW_WORKER_SECRET (same value as in Vercel).");
@@ -236,7 +238,7 @@ async function tick() {
   } catch (error) {
     log(`Failed: ${error.message}`);
     failStreak++;
-    await report(job, { ok: false, error: String(error.message).slice(0, 1900) }).catch((e) => log(`Couldn't report the failure: ${e.message}`));
+    await report(job, { ok: false, error: `${String(error.message).slice(0, 1800)} [flow-mcp: ${fixStatus}]` }).catch((e) => log(`Couldn't report the failure: ${e.message}`));
   }
   // Checkpoint: several failures in a row usually mean Flow itself is unwell (signed out, busy,
   // page changed). Pause instead of spending credits on clips that will fail the same way.
@@ -247,6 +249,55 @@ async function tick() {
   }
   return 5;
 }
+
+// ── flow-mcp fixes (operator-approved) ───────────────────────
+// Google changes the Flow page faster than flow-mcp ships fixes. Each fix is a fixed text replacement, applied to
+// flow-mcp's source and to the compiled file it actually runs (dist/), so no rebuild is needed; when something
+// changed, the running flow-mcp is stopped and the worker exits, and the launcher starts both again.
+const COST_LINK = 'getByRole("link", { name: /credits?$/ }).filter({ hasText: /\\d/ }).first().innerText()';
+const FLOW_MCP_FIXES = [
+  // Flow shows the clip cost ("20 credits") and an "Add AI credits" button: read the one with a number.
+  ['getByRole("link", { name: /credits?$/ }).first().innerText()', COST_LINK],
+  ['getByRole("link", { name: /credits?$/ }).innerText()', COST_LINK],
+];
+let fixStatus = "not checked";
+
+function patchFlowMcp() {
+  const files = [join(FLOW_MCP_DIR, "src", "flow.ts"), join(FLOW_MCP_DIR, "dist", "flow.js")].filter((f) => existsSync(f));
+  if (!files.length) return (fixStatus = `flow-mcp not found in ${FLOW_MCP_DIR}`), false;
+  let changedDist = false;
+  for (const file of files) {
+    const before = readFileSync(file, "utf8");
+    let after = before;
+    for (const [from, to] of FLOW_MCP_FIXES) after = after.split(from).join(to);
+    if (after !== before) {
+      writeFileSync(file, after);
+      if (file.endsWith(".js")) changedDist = true;
+    }
+  }
+  const dist = files.find((f) => f.endsWith(".js"));
+  const ok = dist && readFileSync(dist, "utf8").includes(COST_LINK);
+  fixStatus = ok ? "credit-link fix active" : `credit-link fix missing in ${dist ?? "dist/flow.js (not built)"}`;
+  return changedDist;
+}
+
+function restartFlowMcp() {
+  // The launcher starts flow-mcp again before it restarts this worker.
+  try {
+    const out = execSync(`netstat -ano -p tcp`, { encoding: "utf8" });
+    const pids = new Set(out.split(/\r?\n/).filter((l) => l.includes(`:${FLOW_PORT}`) && /LISTEN/i.test(l)).map((l) => l.trim().split(/\s+/).pop()));
+    for (const pid of pids) if (/^\d+$/.test(pid)) execSync(`taskkill /PID ${pid} /F`, { stdio: "ignore" });
+  } catch (error) {
+    log(`Couldn't restart flow-mcp automatically (${error.message}); close its window and run the launcher again.`);
+  }
+}
+
+if (patchFlowMcp()) {
+  log("Applied a fix for a Flow page change to flow-mcp; restarting flow-mcp and the worker…");
+  restartFlowMcp();
+  process.exit(0);
+}
+log(`flow-mcp: ${fixStatus}.`);
 
 log(`Lumen Flow worker: ${LUMEN_URL}, cap ${MAX_CREDITS}/clip, ${DAILY_CREDITS}/day.`);
 for (;;) {
