@@ -33,7 +33,7 @@ it("counts a channel's own worker, and lists the channels that have one", async 
   ]);
   expect(await flowWorkerStatus(NOW)).toMatchObject({ online: true, ready: true, creditsLeft: 300 });
   db.workerHeartbeat.findMany.mockResolvedValue([{ engine: "FLOW:Juu-Muu", seenAt: ago(60_000), creditsLeft: 300 }]);
-  expect(await dedicatedFlowChannels(NOW)).toEqual(["Juu-Muu"]);
+  expect(await dedicatedFlowChannels()).toEqual(["Juu-Muu"]);
 });
 
 it("withdraws only queued Flow clips of the video being rendered", async () => {

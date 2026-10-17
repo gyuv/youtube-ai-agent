@@ -20,8 +20,6 @@ export const FLOW_CLIP_CAP = 15;
 
 /** Heartbeat key of a worker: the shared one, or a channel's own worker ("FLOW:Juu-Muu"). */
 export const flowHeartbeatKey = (channel?: string | null) => (channel ? `${FLOW_ENGINE}:${channel}` : FLOW_ENGINE);
-/** A dedicated worker seen within this long keeps its channel away from the shared worker. */
-export const DEDICATED_WORKER_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function recordFlowHeartbeat(creditsLeft: number | null, now: Date = new Date(), channel?: string | null) {
   const engine = flowHeartbeatKey(channel);
@@ -32,9 +30,13 @@ export async function recordFlowHeartbeat(creditsLeft: number | null, now: Date 
   });
 }
 
-/** Channels that have their own Flow worker (each with its own Google account and credits). */
-export async function dedicatedFlowChannels(now: Date = new Date()): Promise<string[]> {
-  const beats = await prisma.workerHeartbeat.findMany({ where: { engine: { startsWith: `${FLOW_ENGINE}:` }, seenAt: { gt: new Date(now.getTime() - DEDICATED_WORKER_MS) } } });
+/**
+ * Channels that have their own Flow worker (each with its own Google account and credits). Once a channel has a
+ * "FLOW:<channel>" row it stays reserved, even while its worker is offline, so the shared worker never spends
+ * another account's credits on it.
+ */
+export async function dedicatedFlowChannels(): Promise<string[]> {
+  const beats = await prisma.workerHeartbeat.findMany({ where: { engine: { startsWith: `${FLOW_ENGINE}:` } } });
   return beats.map((b) => b.engine.slice(FLOW_ENGINE.length + 1));
 }
 
