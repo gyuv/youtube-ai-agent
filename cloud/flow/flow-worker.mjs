@@ -119,7 +119,7 @@ async function lumen(path, body) {
 const report = (job, result) => lumen("/api/flow/complete", { sceneId: job.sceneId, claimedAt: job.claimedAt, ...result });
 
 async function runJob(job, book) {
-  const scene = { prompt: job.prompt, type: "video", aspect_ratio: job.height > job.width ? "9:16" : "16:9", max_credits: MAX_CREDITS, retries: 1 };
+  const scene = { prompt: job.prompt, type: "video", aspect_ratio: job.height > job.width ? "9:16" : "16:9", max_credits: MAX_CREDITS, retries: 0 };
   if (MODEL) scene.model = MODEL;
   if (DURATION) scene.duration = Number(DURATION);
   if (RESOLUTION) scene.resolution = RESOLUTION;
@@ -184,21 +184,26 @@ async function runJob(job, book) {
 
 let lastRecoveryError = "";
 
-/** Fetch a clip Flow already made (and charged for) by its title prefix; flow_download is free. */
+/**
+ * Fetch a clip Flow already made (and charged for) by its title prefix; flow_download is free.
+ * A Veo clip takes a few minutes to finish, so keep looking for up to ~6 minutes before giving up.
+ */
 async function recoverClip(prompt) {
-  for (const len of [100, 70]) {
-    try {
-      await sleep(15);
-      const res = await flow("download", { project: "lumen-recovered", assets: [prompt.slice(0, len).trim()] });
-      const files = (res.files ?? []).filter((f) => f.endsWith(".mp4"));
-      if (files.length) {
-        log(`Recovered the finished clip from Flow without spending credits again.`);
-        return files;
+  for (let round = 0; round < 12; round++) {
+    await sleep(30);
+    for (const len of [100, 70, 40]) {
+      try {
+        const res = await flow("download", { project: "lumen-recovered", assets: [prompt.slice(0, len).trim()] });
+        const files = (res.files ?? []).filter((f) => f.endsWith(".mp4"));
+        if (files.length) {
+          log(`Recovered the finished clip from Flow without spending credits again.`);
+          return files;
+        }
+      } catch (error) {
+        lastRecoveryError = String(error.message).slice(0, 300);
       }
-    } catch (error) {
-      lastRecoveryError = String(error.message).slice(0, 300);
-      log(`Couldn't recover the clip yet (${lastRecoveryError.slice(0, 120)}).`);
     }
+    log(`Clip not finished in Flow yet (${lastRecoveryError.slice(0, 120)}); checking again in 30s…`);
   }
   return null;
 }
